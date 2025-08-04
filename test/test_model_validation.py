@@ -5,6 +5,7 @@
 验证定义的Pydantic模型能正确解析禅道API响应数据
 """
 
+import os
 import json
 import logging
 import httpx
@@ -65,7 +66,10 @@ def test_user_model(session_id: str):
     logger.info("=" * 60)
     
     # 用户登录API响应
-    params = {"account": "lianping", "password": "123456"}
+    params = {
+        "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
+        "password": os.getenv("ZENTAO_PASSWORD", "123456"),
+    }
     resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)
     raw_data = resp.json()
     

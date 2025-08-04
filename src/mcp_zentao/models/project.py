@@ -4,9 +4,10 @@
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
 from datetime import date
+from collections import OrderedDict
 
 
 class ProjectType(str, Enum):
@@ -105,6 +106,119 @@ class ProjectModel(BaseModel):
     order: str = Field(description="排序")
     deleted: str = Field(description="是否删除，0=未删除")
     delay: Optional[int] = Field(default=0, description="延期天数")
+
+    def __repr__(self) -> str:
+        """简洁的字符串表示"""
+        return f"Project({self.id}: {self.name} - {self.status.value})"
+
+    def display_fields(self) -> OrderedDict[str, Any]:
+        """返回与禅道界面字段匹配的有序字典"""
+        return OrderedDict([
+            ("ID", self.id),
+            ("项目代号", self.code),
+            ("项目名称", self.name),
+            ("开始日期", self.begin),
+            ("截止日期", self.end),
+            ("状态", self._get_status_display()),
+            ("角色", self._get_role_display()),
+            ("加盟日", self.join),
+            ("可用工时/天", self._get_available_hours_display()),
+        ])
+
+    def _get_status_display(self) -> str:
+        """获取状态的中文显示"""
+        status_map = {
+            ProjectStatus.WAIT: "未开始",
+            ProjectStatus.DOING: "进行中",
+            ProjectStatus.SUSPENDED: "已挂起",
+            ProjectStatus.CLOSED: "已关闭"
+        }
+        return status_map.get(self.status, self.status.value)
+
+    def _get_role_display(self) -> str:
+        """获取角色的中文显示"""
+        # 角色映射可能需要根据实际系统进行调整
+        role_map = {
+            "po": "产品经理",
+            "pm": "项目经理", 
+            "qd": "测试负责人",
+            "rd": "开发负责人",
+            "dev": "开发人员",
+            "test": "测试人员",
+            "pm1": "项目经理",
+            "admin": "管理员"
+        }
+        return role_map.get(self.role.lower(), self.role)
+
+    def _get_available_hours_display(self) -> str:
+        """获取可用工时显示"""
+        if self.hours and self.hours != "0":
+            return self.hours
+        return "8.0"  # 默认8小时工作制
+
+    def _get_priority_display(self) -> str:
+        """获取优先级的中文显示"""
+        priority_map = {
+            ProjectPriority.LOW: "低",
+            ProjectPriority.NORMAL: "正常",
+            ProjectPriority.HIGH: "高", 
+            ProjectPriority.URGENT: "紧急"
+        }
+        return priority_map.get(self.pri, str(self.pri.value))
+
+    def available_actions(self) -> Dict[str, bool]:
+        """返回可用操作的状态"""
+        return {
+            "开始": self.status == ProjectStatus.WAIT,
+            "挂起": self.status == ProjectStatus.DOING,
+            "激活": self.status == ProjectStatus.SUSPENDED,
+            "关闭": self.status in [ProjectStatus.DOING, ProjectStatus.SUSPENDED],
+            "编辑": self.status != ProjectStatus.CLOSED,
+            "删除": self.status == ProjectStatus.CLOSED
+        }
+
+    def display_summary(self) -> str:
+        """格式化的展示摘要"""
+        fields = self.display_fields()
+        actions = self.available_actions()
+        
+        lines = []
+        lines.append("=" * 50)
+        lines.append(f"项目详情: {fields['项目名称']}")
+        lines.append("=" * 50)
+        
+        # 基本信息
+        for key, value in fields.items():
+            lines.append(f"{key:10}: {value}")
+        
+        # 团队信息
+        lines.append(f"\n团队信息:")
+        if self.PO:
+            lines.append(f"  产品负责人: {self.PO}")
+        if self.PM:
+            lines.append(f"  项目经理  : {self.PM}")
+        if self.QD:
+            lines.append(f"  测试负责人: {self.QD}")
+        if self.RD:
+            lines.append(f"  开发负责人: {self.RD}")
+        
+        # 进度信息
+        lines.append(f"\n工时统计:")
+        lines.append(f"  预估工时  : {self.estimate}")
+        lines.append(f"  已消耗    : {self.consumed}")
+        lines.append(f"  剩余工时  : {self.left}")
+        
+        # 延期情况
+        if hasattr(self, 'delay') and self.delay and self.delay > 0:
+            lines.append(f"  延期天数  : {self.delay}天")
+        
+        # 可用操作
+        lines.append(f"\n可用操作:")
+        for action, available in actions.items():
+            status = "✓" if available else "✗"
+            lines.append(f"  {status} {action}")
+        
+        return "\n".join(lines)
 
 
 class ProjectListData(BaseModel):

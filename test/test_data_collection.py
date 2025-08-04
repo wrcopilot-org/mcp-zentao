@@ -5,6 +5,7 @@
 用于收集禅道 API 的响应数据，为数据建模提供基础
 """
 
+import os
 import json
 import logging
 import httpx
@@ -43,8 +44,8 @@ def collect_user_login_response(session_id: str) -> Dict[str, Any]:
     logger.info("正在收集用户登录 API 响应数据...")
     
     params = {
-        "account": "lianping",
-        "password": "123456",
+        "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
+        "password": os.getenv("ZENTAO_PASSWORD", "123456"),
     }
     
     resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)

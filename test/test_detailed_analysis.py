@@ -5,6 +5,7 @@
 分析项目、任务、缺陷的详细结构
 """
 
+import os
 import json
 import logging
 import httpx
@@ -25,7 +26,10 @@ def setup_session() -> str:
     session_id = data["sessionID"]
     
     # 用户登录
-    params = {"account": "lianping", "password": "123456"}
+    params = {
+        "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
+        "password": os.getenv("ZENTAO_PASSWORD", "123456"),
+    }
     resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)
     
     return session_id

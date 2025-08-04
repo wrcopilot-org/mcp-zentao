@@ -4,8 +4,9 @@
 """
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
+from collections import OrderedDict
 
 
 class BugSeverity(int, Enum):
@@ -148,6 +149,122 @@ class BugModel(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
+    def __repr__(self) -> str:
+        """简洁的字符串表示"""
+        return f"Bug({self.id}: {self.title} - {self.status.value})"
+
+    def display_fields(self) -> OrderedDict[str, Any]:
+        """返回与禅道界面字段匹配的有序字典"""
+        return OrderedDict([
+            ("ID", self.id),
+            ("级别", self._get_severity_display()),
+            ("P", self._get_priority_display()),
+            ("类型", self._get_type_display()),
+            ("Bug标题", self.title),
+            ("创建", self.openedBy),
+            ("指派给", self.assignedTo),
+            ("解决", self.resolvedBy or ""),
+            ("方案", self._get_resolution_display()),
+        ])
+
+    def _get_severity_display(self) -> str:
+        """获取严重程度的中文显示"""
+        severity_map = {
+            BugSeverity.LOWEST: "1-建议",
+            BugSeverity.LOW: "2-一般", 
+            BugSeverity.NORMAL: "3-重要",
+            BugSeverity.HIGH: "4-严重"
+        }
+        return severity_map.get(self.severity, str(self.severity.value))
+
+    def _get_priority_display(self) -> str:
+        """获取优先级的中文显示"""
+        priority_map = {
+            BugPriority.LOWEST: "低",
+            BugPriority.LOW: "低",
+            BugPriority.NORMAL: "中", 
+            BugPriority.HIGH: "高"
+        }
+        return priority_map.get(self.pri, str(self.pri.value))
+
+    def _get_type_display(self) -> str:
+        """获取类型的中文显示"""
+        type_map = {
+            BugType.CODEERROR: "代码错误",
+            BugType.INTERFACE: "界面优化",
+            BugType.CONFIG: "配置相关",
+            BugType.INSTALL: "安装部署",
+            BugType.SECURITY: "安全相关",
+            BugType.PERFORMANCE: "性能问题",
+            BugType.STANDARD: "标准规范",
+            BugType.AUTOMATION: "测试脚本",
+            BugType.OTHERS: "其他",
+            BugType.GNWT: "功能问题",
+            BugType.JMLJ: "界面逻辑",
+            BugType.LWT: "逻辑问题",
+            BugType.SJQX: "数据缺陷"
+        }
+        return type_map.get(self.type, self.type.value)
+
+    def _get_resolution_display(self) -> str:
+        """获取解决方案的中文显示"""
+        if self.resolution is None:
+            return ""
+        
+        resolution_map = {
+            BugResolution.FIXED: "已修复",
+            BugResolution.POSTPONED: "延期处理",
+            BugResolution.WILLNOTFIX: "不予修复",
+            BugResolution.BYDESIGN: "设计如此",
+            BugResolution.DUPLICATE: "重复Bug",
+            BugResolution.EXTERNAL: "外部原因",
+            BugResolution.NOTREPRO: "无法重现"
+        }
+        return resolution_map.get(self.resolution, self.resolution.value)
+
+    def _get_status_display(self) -> str:
+        """获取状态的中文显示"""
+        status_map = {
+            BugStatus.ACTIVE: "激活",
+            BugStatus.RESOLVED: "已解决",
+            BugStatus.CLOSED: "已关闭"
+        }
+        return status_map.get(self.status, self.status.value)
+
+    def available_actions(self) -> Dict[str, bool]:
+        """返回可用操作的状态"""
+        return {
+            "确认": self.status == BugStatus.ACTIVE and self.confirmed == "0",
+            "解决": self.status == BugStatus.ACTIVE and self.confirmed == "1",
+            "关闭": self.status == BugStatus.RESOLVED
+        }
+
+    def display_summary(self) -> str:
+        """格式化的展示摘要"""
+        fields = self.display_fields()
+        actions = self.available_actions()
+        
+        lines = []
+        lines.append("=" * 50)
+        lines.append(f"Bug详情: {fields['Bug标题']}")
+        lines.append("=" * 50)
+        
+        # 基本信息
+        for key, value in fields.items():
+            lines.append(f"{key:8}: {value}")
+        
+        # 当前状态
+        lines.append(f"当前状态  : {self._get_status_display()}")
+        lines.append(f"确认状态  : {'已确认' if self.confirmed == '1' else '未确认'}")
+        
+        # 可用操作
+        lines.append("\n可用操作:")
+        for action, available in actions.items():
+            status = "✓" if available else "✗"
+            lines.append(f"  {status} {action}")
+        
+        return "\n".join(lines)
 
 
 class BugListData(BaseModel):

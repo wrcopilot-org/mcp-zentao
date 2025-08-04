@@ -4,8 +4,9 @@
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from enum import Enum
+from collections import OrderedDict
 
 
 class TaskType(str, Enum):
@@ -118,6 +119,69 @@ class TaskModel(BaseModel):
     
     # 进度计算
     progress: int = Field(description="完成进度百分比")
+
+    def __repr__(self) -> str:
+        """简洁的字符串表示"""
+        return f"Task({self.id}: {self.name} - {self.status.value})"
+
+    def display_fields(self) -> OrderedDict[str, Any]:
+        """返回与禅道界面字段匹配的有序字典"""
+        return OrderedDict([
+            ("ID", self.id),
+            ("P", self.pri.value),  # P 很可能是 Priority 的缩写
+            ("所属项目", self.projectName),
+            ("任务名称", self.name),
+            ("创建", self.openedBy),
+            ("指派给", self.assignedTo),
+            ("由谁完成", self.finishedBy or ""),
+            ("预计", self.estimate),
+            ("消耗", self.consumed),
+            ("剩余", self.left),
+            ("截止", self.deadline or ""),
+            ("状态", self._get_status_display()),
+        ])
+
+    def _get_status_display(self) -> str:
+        """获取状态的中文显示"""
+        status_map = {
+            TaskStatus.WAIT: "未开始",
+            TaskStatus.DOING: "进行中", 
+            TaskStatus.DONE: "已完成",
+            TaskStatus.PAUSE: "已暂停",
+            TaskStatus.CANCEL: "已取消",
+            TaskStatus.CLOSED: "已关闭"
+        }
+        return status_map.get(self.status, self.status.value)
+
+    def available_actions(self) -> Dict[str, bool]:
+        """返回可用操作的状态"""
+        return {
+            "开始": self.status == TaskStatus.WAIT,
+            "关闭": self.status in [TaskStatus.DOING, TaskStatus.PAUSE],
+            "完成": self.status == TaskStatus.DOING
+        }
+
+    def display_summary(self) -> str:
+        """格式化的展示摘要"""
+        fields = self.display_fields()
+        actions = self.available_actions()
+        
+        lines = []
+        lines.append("=" * 50)
+        lines.append(f"任务详情: {fields['任务名称']}")
+        lines.append("=" * 50)
+        
+        # 基本信息
+        for key, value in fields.items():
+            lines.append(f"{key:8}: {value}")
+        
+        # 可用操作
+        lines.append("\n可用操作:")
+        for action, available in actions.items():
+            status = "✓" if available else "✗"
+            lines.append(f"  {status} {action}")
+        
+        return "\n".join(lines)
 
 
 class TaskListData(BaseModel):

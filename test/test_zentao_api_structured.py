@@ -5,6 +5,7 @@
 使用结构化数据模型进行测试
 """
 
+import os
 import json
 import logging
 import httpx
@@ -55,8 +56,8 @@ def test_user_login_structured():
     
     # 构建登录请求参数
     login_params = LoginRequest(
-        account="lianping",
-        password="123456"
+        account=os.getenv("ZENTAO_ACCOUNT", "lianping"),
+        password=os.getenv("ZENTAO_PASSWORD", "123456")
     )
     
     resp = ZENTAO_HOST.get(

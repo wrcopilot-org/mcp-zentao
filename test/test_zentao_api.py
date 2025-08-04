@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 
 
-import json, logging, httpx
+import os, json, logging, httpx
 
 
 ZENTAO_HOST = httpx.Client(base_url="http://192.168.2.84/zentao/")
@@ -23,8 +23,8 @@ def test_get_session_id():
 def test_user_login_with_sessionid():
     sessionid = test_get_session_id()
     params = {
-        "account": "lianping",
-        "password": "123456",
+        "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
+        "password": os.getenv("ZENTAO_PASSWORD", "123456"),
         # "verifyRand": data.get("rand")
         # "keepLogin": 0
     }
