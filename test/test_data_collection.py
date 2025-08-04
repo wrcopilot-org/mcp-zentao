@@ -87,10 +87,10 @@ def collect_project_response() -> Dict[str, Any]:
             projects = data["projects"]
             logger.info(f"    - projects 类型: {type(projects)}")
             
-            if isinstance(projects, dict) and projects:
+            if isinstance(projects, list) and projects:
                 # 分析第一个项目的结构
-                first_project_id, first_project = next(iter(projects.items()))
-                logger.info(f"    - 项目示例 (ID: {first_project_id}):")
+                first_project = projects[0]
+                logger.info(f"    - 项目示例:")
                 for key, value in first_project.items():
                     logger.info(f"      - {key}: {type(value).__name__} = {value}")
         
@@ -120,10 +120,10 @@ def collect_task_response() -> Dict[str, Any]:
             tasks = data["tasks"]
             logger.info(f"    - tasks 类型: {type(tasks)}")
             
-            if isinstance(tasks, dict) and tasks:
+            if isinstance(tasks, list) and tasks:
                 # 分析第一个任务的结构
-                first_task_id, first_task = next(iter(tasks.items()))
-                logger.info(f"    - 任务示例 (ID: {first_task_id}):")
+                first_task = tasks[0]
+                logger.info(f"    - 任务示例:")
                 for key, value in first_task.items():
                     logger.info(f"      - {key}: {type(value).__name__} = {value}")
         
@@ -153,10 +153,10 @@ def collect_bug_response() -> Dict[str, Any]:
             bugs = data["bugs"]
             logger.info(f"    - bugs 类型: {type(bugs)}")
             
-            if isinstance(bugs, dict) and bugs:
+            if isinstance(bugs, list) and bugs:
                 # 分析第一个缺陷的结构
-                first_bug_id, first_bug = next(iter(bugs.items()))
-                logger.info(f"    - 缺陷示例 (ID: {first_bug_id}):")
+                first_bug = bugs[0]
+                logger.info(f"    - 缺陷示例:")
                 for key, value in first_bug.items():
                     logger.info(f"      - {key}: {type(value).__name__} = {value}")
         
