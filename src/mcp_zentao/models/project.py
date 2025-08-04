@@ -224,6 +224,10 @@ class ProjectModel(BaseModel):
 class ProjectListData(BaseModel):
     """项目列表数据结构"""
     projects: List[ProjectModel] = Field(description="项目列表")
+    
+    def get_project_list(self) -> List[ProjectModel]:
+        """获取项目列表"""
+        return self.projects
 
 
 class ProjectListResponse(BaseModel):
@@ -236,6 +240,16 @@ class ProjectListResponse(BaseModel):
         import json
         parsed_data = json.loads(self.data)
         return ProjectListData.model_validate(parsed_data)
+    
+    def get_project_list(self) -> List[ProjectModel]:
+        """获取项目列表"""
+        project_data = self.get_project_data()
+        return project_data.get_project_list()
+    
+    def get_project_list_data(self) -> Dict[str, Any]:
+        """获取原始项目列表数据（用于分页）"""
+        import json
+        return json.loads(self.data)
 
 
 class ProjectDetailResponse(BaseModel):

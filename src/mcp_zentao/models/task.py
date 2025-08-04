@@ -187,6 +187,10 @@ class TaskModel(BaseModel):
 class TaskListData(BaseModel):
     """任务列表数据结构"""
     tasks: List[TaskModel] = Field(description="任务列表")
+    
+    def get_task_list(self) -> List[TaskModel]:
+        """获取任务列表"""
+        return self.tasks
 
 
 class TaskListResponse(BaseModel):
@@ -199,6 +203,16 @@ class TaskListResponse(BaseModel):
         import json
         parsed_data = json.loads(self.data)
         return TaskListData.model_validate(parsed_data)
+    
+    def get_task_list(self) -> List[TaskModel]:
+        """获取任务列表"""
+        task_data = self.get_task_data()
+        return task_data.get_task_list()
+    
+    def get_task_list_data(self) -> Dict[str, Any]:
+        """获取原始任务列表数据（用于分页）"""
+        import json
+        return json.loads(self.data)
 
 
 class TaskDetailResponse(BaseModel):

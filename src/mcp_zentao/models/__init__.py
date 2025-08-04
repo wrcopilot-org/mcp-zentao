@@ -23,6 +23,17 @@ from .common import (
     validate_datetime_string,
 )
 
+# 分页模型
+from .pagination import (
+    SortOrder,
+    SortField, 
+    PageParams,
+    PagerInfo,
+    PaginatedListParams,
+    PaginatedResponse,
+    PaginationHelper,
+)
+
 # 会话管理模型
 from .session import (
     SessionStatus,
@@ -109,6 +120,15 @@ __all__ = [
     "ZERO_DATETIME",
     "validate_date_string",
     "validate_datetime_string",
+    
+    # 分页模型
+    "SortOrder",
+    "SortField", 
+    "PageParams",
+    "PagerInfo",
+    "PaginatedListParams",
+    "PaginatedResponse",
+    "PaginationHelper",
     
     # 会话管理
     "SessionStatus",

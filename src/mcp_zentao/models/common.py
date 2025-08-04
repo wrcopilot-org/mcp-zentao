@@ -17,18 +17,20 @@ class ResponseStatus(str, Enum):
     ERROR = "error"
 
 
-class ZenTaoError(BaseModel):
-    """禅道错误信息模型"""
-    code: Optional[str] = Field(default=None, description="错误代码")
-    message: str = Field(description="错误消息")
-    details: Optional[dict] = Field(default=None, description="错误详情")
+class ZenTaoError(Exception):
+    """禅道API错误异常"""
+    
+    def __init__(self, status: str, message: str, data: Any = None):
+        self.status = status
+        self.message = message
+        self.data = data
+        super().__init__(message)
 
 
 class BaseResponse(BaseModel, Generic[T]):
     """基础响应模型"""
     status: ResponseStatus = Field(description="响应状态")
     message: Optional[str] = Field(default=None, description="响应消息")
-    error: Optional[ZenTaoError] = Field(default=None, description="错误信息")
 
 
 class DataResponse(BaseResponse[T]):

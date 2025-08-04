@@ -270,6 +270,10 @@ class BugModel(BaseModel):
 class BugListData(BaseModel):
     """缺陷列表数据结构"""
     bugs: List[BugModel] = Field(description="缺陷列表")
+    
+    def get_bug_list(self) -> List[BugModel]:
+        """获取缺陷列表"""
+        return self.bugs
 
 
 class BugListResponse(BaseModel):
@@ -282,6 +286,16 @@ class BugListResponse(BaseModel):
         import json
         parsed_data = json.loads(self.data)
         return BugListData.model_validate(parsed_data)
+    
+    def get_bug_list(self) -> List[BugModel]:
+        """获取缺陷列表"""
+        bug_data = self.get_bug_data()
+        return bug_data.get_bug_list()
+    
+    def get_bug_list_data(self) -> Dict[str, Any]:
+        """获取原始缺陷列表数据（用于分页）"""
+        import json
+        return json.loads(self.data)
 
 
 class BugDetailResponse(BaseModel):
