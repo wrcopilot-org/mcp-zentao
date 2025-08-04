@@ -340,8 +340,8 @@ class TestNotImplementedFeatures:
         logger.info("✅ 启动项目功能正确抛出NotImplementedError")
 
 
-class TestClientUpdates:
-    """测试原有客户端功能更新（保留用于向后兼容性测试）"""
+class TestClientAPI:
+    """测试ZenTao客户端功能"""
     
     @pytest.fixture(scope="class")
     def authenticated_session(self):
