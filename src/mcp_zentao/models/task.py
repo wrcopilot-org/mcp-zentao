@@ -215,10 +215,45 @@ class TaskListResponse(BaseModel):
         return json.loads(self.data)
 
 
+class TaskDetailData(BaseModel):
+    """任务详情数据结构（来自API的data字段）"""
+    title: str = Field(description="页面标题")
+    project: Dict[str, Any] = Field(description="项目信息")
+    task: Dict[str, Any] = Field(description="任务详细信息")  # 使用Dict来避免字段不匹配
+    actions: Dict[str, Dict[str, Any]] = Field(description="操作历史")
+    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
+    preAndNext: Dict[str, Any] = Field(description="前一个和后一个任务")
+    product: str = Field(description="产品信息")
+    modulePath: List[Any] = Field(description="模块路径")
+    pager: Optional[Any] = Field(default=None, description="分页信息")
+
+
 class TaskDetailResponse(BaseModel):
     """任务详情响应"""
     status: str = Field(description="响应状态")
-    task: TaskModel = Field(description="任务详细信息")
+    data: str = Field(description="JSON字符串格式的详情数据")
+    md5: Optional[str] = Field(default=None, description="数据MD5校验")
+    
+    def get_task_detail_data(self) -> TaskDetailData:
+        """解析data字段并返回TaskDetailData对象"""
+        import json
+        parsed_data = json.loads(self.data)
+        return TaskDetailData.model_validate(parsed_data)
+    
+    def get_task(self) -> Dict[str, Any]:
+        """获取任务详细信息"""
+        detail_data = self.get_task_detail_data()
+        return detail_data.task
+    
+    def get_project_info(self) -> Dict[str, Any]:
+        """获取项目信息"""
+        detail_data = self.get_task_detail_data()
+        return detail_data.project
+    
+    def get_users_mapping(self) -> Dict[str, str]:
+        """获取用户名到真实姓名的映射"""
+        detail_data = self.get_task_detail_data()
+        return detail_data.users
 
 
 class TaskCreateRequest(BaseModel):

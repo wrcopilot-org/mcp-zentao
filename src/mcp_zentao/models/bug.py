@@ -298,10 +298,55 @@ class BugListResponse(BaseModel):
         return json.loads(self.data)
 
 
+class BugDetailData(BaseModel):
+    """缺陷详情数据结构（来自API的data字段）"""
+    title: str = Field(description="页面标题")
+    products: Dict[str, str] = Field(description="所有产品列表")
+    productID: str = Field(description="当前产品ID")
+    productName: str = Field(description="当前产品名称")
+    branches: List[Any] = Field(description="分支信息")
+    modulePath: List[Dict[str, Any]] = Field(description="模块路径")
+    bugModule: Dict[str, Any] = Field(description="缺陷所属模块")
+    bug: BugModel = Field(description="缺陷详细信息")
+    branchName: str = Field(description="分支名称")
+    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
+    actions: Dict[str, Dict[str, Any]] = Field(description="操作历史")
+    builds: Dict[str, str] = Field(description="版本构建列表")
+    preAndNext: Dict[str, Any] = Field(description="前一个和后一个缺陷")
+    pager: Optional[Any] = Field(default=None, description="分页信息")
+
+
 class BugDetailResponse(BaseModel):
     """缺陷详情响应"""
     status: str = Field(description="响应状态")
-    bug: BugModel = Field(description="缺陷详细信息")
+    data: str = Field(description="JSON字符串格式的详情数据")
+    md5: Optional[str] = Field(default=None, description="数据MD5校验")
+    
+    def get_bug_detail_data(self) -> BugDetailData:
+        """解析data字段并返回BugDetailData对象"""
+        import json
+        parsed_data = json.loads(self.data)
+        return BugDetailData.model_validate(parsed_data)
+    
+    def get_bug(self) -> BugModel:
+        """获取缺陷详细信息"""
+        detail_data = self.get_bug_detail_data()
+        return detail_data.bug
+    
+    def get_users_mapping(self) -> Dict[str, str]:
+        """获取用户名到真实姓名的映射"""
+        detail_data = self.get_bug_detail_data()
+        return detail_data.users
+    
+    def get_products_mapping(self) -> Dict[str, str]:
+        """获取产品ID到产品名称的映射"""
+        detail_data = self.get_bug_detail_data()
+        return detail_data.products
+    
+    def get_builds_mapping(self) -> Dict[str, str]:
+        """获取版本构建的映射"""
+        detail_data = self.get_bug_detail_data()
+        return detail_data.builds
 
 
 class BugCreateRequest(BaseModel):

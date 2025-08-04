@@ -258,6 +258,68 @@ class ProjectDetailResponse(BaseModel):
     project: ProjectModel = Field(description="项目详细信息")
 
 
+class ProjectTaskData(BaseModel):
+    """项目任务数据结构（来自API的data字段）"""
+    title: str = Field(description="页面标题")
+    projects: Dict[str, str] = Field(description="所有项目列表")
+    project: Dict[str, Any] = Field(description="当前项目信息")  # 使用Dict来避免字段不匹配
+    childProjects: List[Any] = Field(description="子项目列表")
+    products: List[Any] = Field(description="产品列表")
+    teamMembers: Dict[str, Dict[str, Any]] = Field(description="团队成员信息")
+    modulePairs: List[Any] = Field(description="模块对")
+    tasks: Dict[str, Dict[str, Any]] = Field(description="任务列表，任务ID到任务信息的映射")
+    summary: str = Field(description="任务统计摘要")
+    tabID: str = Field(description="标签页ID")
+    pager: Optional[Dict[str, Any]] = Field(default=None, description="分页信息")
+    recTotal: int = Field(description="总记录数")
+    recPerPage: int = Field(description="每页记录数")
+    orderBy: str = Field(description="排序方式")
+    browseType: str = Field(description="浏览类型")
+    status: str = Field(description="状态过滤")
+    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
+    param: int = Field(description="参数")
+    projectID: str = Field(description="项目ID")
+    productID: int = Field(description="产品ID")
+    modules: List[str] = Field(description="模块列表")
+    moduleID: int = Field(description="模块ID")
+    memberPairs: Dict[str, str] = Field(description="成员对，用户名到真实姓名的映射")
+    branchGroups: List[Any] = Field(description="分支组")
+    setModule: bool = Field(description="是否设置模块")
+
+
+class ProjectTaskResponse(BaseModel):
+    """项目任务响应"""
+    status: str = Field(description="响应状态")
+    data: str = Field(description="JSON字符串格式的任务数据")
+    md5: Optional[str] = Field(default=None, description="数据MD5校验")
+    
+    def get_project_task_data(self) -> ProjectTaskData:
+        """解析data字段并返回ProjectTaskData对象"""
+        import json
+        parsed_data = json.loads(self.data)
+        return ProjectTaskData.model_validate(parsed_data)
+    
+    def get_project_info(self) -> Dict[str, Any]:
+        """获取项目信息"""
+        task_data = self.get_project_task_data()
+        return task_data.project
+    
+    def get_tasks(self) -> Dict[str, Dict[str, Any]]:
+        """获取任务列表"""
+        task_data = self.get_project_task_data()
+        return task_data.tasks
+    
+    def get_team_members(self) -> Dict[str, Dict[str, Any]]:
+        """获取团队成员信息"""
+        task_data = self.get_project_task_data()
+        return task_data.teamMembers
+    
+    def get_summary(self) -> str:
+        """获取任务统计摘要"""
+        task_data = self.get_project_task_data()
+        return task_data.summary
+
+
 class ProjectCreateRequest(BaseModel):
     """创建项目请求"""
     name: str = Field(description="项目名称")

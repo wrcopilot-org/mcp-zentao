@@ -50,3 +50,15 @@ class LoginResponse(BaseModel):
     user: dict = Field(description="用户信息，将在 UserModel 中详细定义")
     
     # 注意：这里暂时使用 dict，后续会在 user.py 中定义详细的 UserModel
+
+
+class LogoutResponse(BaseModel):
+    """用户登出的 API 响应模型"""
+    status: SessionStatus = Field(description="响应状态")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "status": "success"
+            }
+        }
