@@ -85,41 +85,6 @@ class ProjectClient(BaseClient):
         
         return all_projects
     
-    def get_all_projects(
-        self, 
-        status: Optional[str] = None,
-        type_filter: Optional[str] = None
-    ) -> List[ProjectModel]:
-        """获取所有项目列表
-        
-        Args:
-            status: 项目状态过滤 ('wait', 'doing', 'suspended', 'done', 'closed')
-            type_filter: 项目类型过滤 ('sprint', 'waterfall', 'ops', 'kanban')
-            
-        Returns:
-            项目列表
-            
-        Raises:
-            ZenTaoError: 获取项目列表失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能获取项目列表")
-        
-        params = {}
-        if status:
-            params['status'] = status
-        if type_filter:
-            params['type'] = type_filter
-        
-        response = self.get(
-            endpoint='project-browse-{sessionid}.json',
-            response_model=ProjectListResponse,
-            params=params if params else None,
-            sessionid=self.session_id
-        )
-        
-        return response.get_project_list()
-    
     def get_project_by_id(self, project_id: str) -> ProjectModel:
         """根据项目ID获取项目详细信息
         
@@ -136,13 +101,12 @@ class ProjectClient(BaseClient):
             raise ValueError("需要先登录才能获取项目信息")
         
         response = self.get(
-            endpoint='project-view-{project_id}-{sessionid}.json',
-            response_model=ProjectDetailResponse,
-            project_id=project_id,
-            sessionid=self.session_id
+            endpoint='project-task-{project_id}.json',
+            response_model=ProjectTaskResponse,
+            project_id=project_id
         )
         
-        return response.get_project_data()
+        return response.get_project_info()
     
     def create_project(self, project_data: ProjectCreateRequest) -> ProjectModel:
         """创建新项目
@@ -154,8 +118,11 @@ class ProjectClient(BaseClient):
             创建的项目信息
             
         Raises:
-            ZenTaoError: 创建项目失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("创建项目功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能创建项目")
         
@@ -183,37 +150,6 @@ class ProjectClient(BaseClient):
                if k in ProjectModel.model_fields and v is not None}
         )
     
-    def edit_project(
-        self, 
-        project_id: str, 
-        project_data: ProjectEditRequest
-    ) -> ProjectModel:
-        """编辑项目信息
-        
-        Args:
-            project_id: 项目ID
-            project_data: 项目编辑请求数据
-            
-        Returns:
-            更新后的项目信息
-            
-        Raises:
-            ZenTaoError: 编辑项目失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能编辑项目")
-        
-        response = self.post(
-            endpoint='project-edit-{project_id}-{sessionid}.json',
-            response_model=CommonOperationResponse,
-            data=project_data.model_dump(exclude_none=True),
-            project_id=project_id,
-            sessionid=self.session_id
-        )
-        
-        # 返回更新后的项目信息
-        return self.get_project_by_id(project_id)
-    
     def close_project(self, project_id: str, comment: Optional[str] = None) -> bool:
         """关闭项目
         
@@ -225,8 +161,11 @@ class ProjectClient(BaseClient):
             是否关闭成功
             
         Raises:
-            ZenTaoError: 关闭项目失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("关闭项目功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能关闭项目")
         
@@ -256,8 +195,11 @@ class ProjectClient(BaseClient):
             是否启动成功
             
         Raises:
-            ZenTaoError: 启动项目失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("启动项目功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能启动项目")
         
@@ -272,62 +214,6 @@ class ProjectClient(BaseClient):
         except Exception:
             return False
     
-    def suspend_project(self, project_id: str, comment: Optional[str] = None) -> bool:
-        """挂起项目
-        
-        Args:
-            project_id: 项目ID
-            comment: 挂起备注
-            
-        Returns:
-            是否挂起成功
-            
-        Raises:
-            ZenTaoError: 挂起项目失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能挂起项目")
-        
-        data = {}
-        if comment:
-            data['comment'] = comment
-        
-        try:
-            self.post(
-                endpoint='project-suspend-{project_id}-{sessionid}.json',
-                response_model=CommonOperationResponse,
-                data=data if data else None,
-                project_id=project_id,
-                sessionid=self.session_id
-            )
-            return True
-        except Exception:
-            return False
-    
-    def search_projects(self, keyword: str) -> List[ProjectModel]:
-        """搜索项目
-        
-        Args:
-            keyword: 搜索关键词（项目名称、描述等）
-            
-        Returns:
-            匹配的项目列表
-            
-        Raises:
-            ZenTaoError: 搜索项目失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能搜索项目")
-        
-        response = self.get(
-            endpoint='project-browse-{sessionid}.json',
-            response_model=ProjectListResponse,
-            params={'search': keyword},
-            sessionid=self.session_id
-        )
-        
-        return response.get_project_list()
-
     def get_project_tasks(self, project_id: str) -> ProjectTaskResponse:
         """获取项目任务详情
         
@@ -344,10 +230,9 @@ class ProjectClient(BaseClient):
             raise ValueError("需要先登录才能获取项目任务")
         
         response = self.get(
-            endpoint='project-task-{project_id}-{sessionid}.json',
+            endpoint='project-task-{project_id}.json',
             response_model=ProjectTaskResponse,
-            project_id=project_id,
-            sessionid=self.session_id
+            project_id=project_id
         )
         
         return response

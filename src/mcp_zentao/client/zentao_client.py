@@ -2,8 +2,10 @@
 禅道API主客户端
 
 整合所有模块的功能，提供统一的禅道API访问接口。
+统一管理HTTP会话和Cookie，确保登录状态在所有子客户端间共享。
 """
 
+import httpx
 from typing import Optional
 from .base_client import BaseClient
 from .session_client import SessionClient
@@ -18,7 +20,8 @@ class ZenTaoClient:
     """禅道API主客户端
     
     整合了会话管理、用户管理、项目管理、任务管理、缺陷管理等所有功能。
-    提供统一的API访问接口和会话管理。
+    提供统一的API访问接口和会话管理，所有子客户端共享同一个HTTP会话，
+    确保登录后的 zentaosid Cookie 在所有API调用中保持一致。
     
     使用示例:
         # 创建客户端
@@ -27,7 +30,7 @@ class ZenTaoClient:
         # 登录
         user = client.login("username", "password")
         
-        # 获取我的项目
+        # 获取我的项目（自动使用登录后的Cookie）
         projects = client.projects.get_my_projects()
         
         # 获取我的任务
@@ -38,6 +41,11 @@ class ZenTaoClient:
         
         # 关闭客户端
         client.close()
+        
+    或使用上下文管理器:
+        with ZenTaoClient("http://zentao.example.com") as client:
+            user = client.login("username", "password")
+            projects = client.get_my_projects()
     """
     
     def __init__(self, base_url: str, timeout: float = 30.0) -> None:
@@ -50,10 +58,14 @@ class ZenTaoClient:
         self.base_url = base_url
         self.timeout = timeout
         
-        # 创建会话管理客户端（作为主客户端）
-        self._session_client = SessionClient(base_url, timeout)
+        # 创建共享的HTTP客户端，用于管理Cookie
+        self._http_client = httpx.Client(
+            timeout=timeout,
+            follow_redirects=True
+        )
         
-        # 创建各个功能模块的客户端，共享HTTP会话
+        # 创建各个功能模块的客户端，使用共享的HTTP客户端
+        self._session_client = SessionClient(base_url, timeout)
         self._user_client = UserClient(base_url, timeout)
         self._project_client = ProjectClient(base_url, timeout)
         self._task_client = TaskClient(base_url, timeout)
@@ -65,14 +77,13 @@ class ZenTaoClient:
         self._current_user: Optional[UserModel] = None
     
     def _sync_http_clients(self) -> None:
-        """同步所有客户端的HTTP会话"""
-        # 所有客户端使用同一个HTTP客户端实例
-        main_client = self._session_client._client
-        
-        self._user_client._client = main_client
-        self._project_client._client = main_client
-        self._task_client._client = main_client
-        self._bug_client._client = main_client
+        """同步所有客户端的HTTP会话，确保Cookie一致性"""
+        # 所有客户端使用同一个HTTP客户端实例，确保Cookie共享
+        self._session_client._client = self._http_client
+        self._user_client._client = self._http_client
+        self._project_client._client = self._http_client
+        self._task_client._client = self._http_client
+        self._bug_client._client = self._http_client
     
     def __enter__(self) -> 'ZenTaoClient':
         """上下文管理器进入"""
@@ -83,33 +94,18 @@ class ZenTaoClient:
         self.close()
     
     def close(self) -> None:
-        """关闭所有客户端连接"""
-        clients = [
-            self._session_client,
-            self._user_client, 
-            self._project_client,
-            self._task_client,
-            self._bug_client
-        ]
-        
-        for client in clients:
-            try:
-                client.close()
-            except Exception:
-                pass  # 忽略关闭时的错误
-    
-    def _sync_session_id(self) -> None:
-        """同步会话ID到所有客户端"""
-        session_id = self._session_client.session_id
-        
-        self._user_client.session_id = session_id
-        self._project_client.session_id = session_id
-        self._task_client.session_id = session_id
-        self._bug_client.session_id = session_id
-    
+        """关闭HTTP客户端连接"""
+        try:
+            self._http_client.close()
+        except Exception:
+            pass  # 忽略关闭时的错误
     @property
     def session_id(self) -> Optional[str]:
-        """获取当前会话ID"""
+        """获取当前会话ID
+        
+        注意：使用Cookie管理时，session_id主要用于URL构建，
+        实际认证依赖HTTP客户端中的zentaosid Cookie
+        """
         return self._session_client.session_id
     
     @property
@@ -119,8 +115,23 @@ class ZenTaoClient:
     
     @property
     def is_logged_in(self) -> bool:
-        """检查是否已登录"""
-        return self._session_client.is_logged_in()
+        """检查是否已登录
+        
+        检查HTTP客户端是否有有效的zentaosid Cookie
+        """
+        # 检查是否有zentaosid Cookie
+        for cookie in self._http_client.cookies.jar:
+            if cookie.name == 'zentaosid' and cookie.value:
+                return True
+        return False
+    
+    @property 
+    def zentao_cookie(self) -> Optional[str]:
+        """获取当前的zentaosid Cookie值"""
+        for cookie in self._http_client.cookies.jar:
+            if cookie.name == 'zentaosid':
+                return cookie.value
+        return None
     
     # 会话管理方法
     def get_session_id(self) -> str:
@@ -128,10 +139,23 @@ class ZenTaoClient:
         
         Returns:
             会话ID字符串
+            
+        Note:
+            获取session_id后会自动设置到所有子客户端，
+            但实际认证主要依赖共享的HTTP客户端中的Cookie
         """
         session_id = self._session_client.get_session_id()
-        self._sync_session_id()
+        self._sync_session_id_to_clients()
         return session_id
+    
+    def _sync_session_id_to_clients(self) -> None:
+        """同步会话ID到所有子客户端（用于URL构建）"""
+        session_id = self._session_client.session_id
+        
+        self._user_client.session_id = session_id
+        self._project_client.session_id = session_id
+        self._task_client.session_id = session_id
+        self._bug_client.session_id = session_id
     
     def login(self, username: str, password: str) -> UserModel:
         """用户登录
@@ -145,9 +169,13 @@ class ZenTaoClient:
             
         Raises:
             ZenTaoError: 登录失败
+            
+        Note:
+            登录成功后，zentaosid Cookie会自动保存在共享的HTTP客户端中，
+            后续所有API调用都会自动携带此Cookie进行认证
         """
         user_response = self._session_client.login(username, password)
-        self._sync_session_id()
+        self._sync_session_id_to_clients()
         
         # 提取用户信息
         self._current_user = user_response.user
@@ -159,10 +187,17 @@ class ZenTaoClient:
         
         Returns:
             登出是否成功
+            
+        Note:
+            登出后会清除共享HTTP客户端中的所有Cookie
         """
         result = self._session_client.logout()
-        self._sync_session_id()
+        self._sync_session_id_to_clients()
         self._current_user = None
+        
+        # 清除所有Cookie
+        self._http_client.cookies.clear()
+        
         return result
     
     # 各模块客户端的访问属性
@@ -174,25 +209,21 @@ class ZenTaoClient:
     @property
     def users(self) -> UserClient:
         """用户管理客户端"""
-        self._sync_session_id()
         return self._user_client
     
     @property
     def projects(self) -> ProjectClient:
         """项目管理客户端"""
-        self._sync_session_id()
         return self._project_client
     
     @property
     def tasks(self) -> TaskClient:
         """任务管理客户端"""
-        self._sync_session_id()
         return self._task_client
     
     @property
     def bugs(self) -> BugClient:
         """缺陷管理客户端"""
-        self._sync_session_id()
         return self._bug_client
     
     # 便捷方法，提供常用操作的快速访问

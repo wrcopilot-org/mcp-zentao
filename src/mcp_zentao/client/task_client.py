@@ -99,44 +99,6 @@ class TaskClient(BaseClient):
         
         return all_tasks
     
-    def get_project_tasks(
-        self, 
-        project_id: str,
-        status: Optional[str] = None,
-        assigned_to: Optional[str] = None
-    ) -> List[TaskModel]:
-        """获取项目下的任务列表
-        
-        Args:
-            project_id: 项目ID
-            status: 任务状态过滤
-            assigned_to: 指派给某人的任务
-            
-        Returns:
-            任务列表
-            
-        Raises:
-            ZenTaoError: 获取任务列表失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能获取任务列表")
-        
-        params = {}
-        if status:
-            params['status'] = status
-        if assigned_to:
-            params['assignedTo'] = assigned_to
-        
-        response = self.get(
-            endpoint='project-task-{project_id}-{sessionid}.json',
-            response_model=TaskListResponse,
-            params=params if params else None,
-            project_id=project_id,
-            sessionid=self.session_id
-        )
-        
-        return response.get_task_list()
-    
     def get_task_by_id(self, task_id: str) -> Dict[str, Any]:
         """根据任务ID获取任务详细信息
         
@@ -153,10 +115,9 @@ class TaskClient(BaseClient):
             raise ValueError("需要先登录才能获取任务信息")
         
         response = self.get(
-            endpoint='task-view-{task_id}-{sessionid}.json',
+            endpoint='task-view-{task_id}.json',
             response_model=TaskDetailResponse,
-            task_id=task_id,
-            sessionid=self.session_id
+            task_id=task_id
         )
         
         return response.get_task()
@@ -177,10 +138,9 @@ class TaskClient(BaseClient):
             raise ValueError("需要先登录才能获取任务详情")
         
         response = self.get(
-            endpoint='task-view-{task_id}-{sessionid}.json',
+            endpoint='task-view-{task_id}.json',
             response_model=TaskDetailResponse,
-            task_id=task_id,
-            sessionid=self.session_id
+            task_id=task_id
         )
         
         return response
@@ -195,8 +155,11 @@ class TaskClient(BaseClient):
             创建的任务信息
             
         Raises:
-            ZenTaoError: 创建任务失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("创建任务功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能创建任务")
         
@@ -226,60 +189,6 @@ class TaskClient(BaseClient):
                if k in TaskModel.model_fields and v is not None}
         )
     
-    def edit_task(self, task_id: str, task_data: TaskEditRequest) -> TaskModel:
-        """编辑任务信息
-        
-        Args:
-            task_id: 任务ID
-            task_data: 任务编辑请求数据
-            
-        Returns:
-            更新后的任务信息
-            
-        Raises:
-            ZenTaoError: 编辑任务失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能编辑任务")
-        
-        response = self.post(
-            endpoint='task-edit-{task_id}-{sessionid}.json',
-            response_model=CommonOperationResponse,
-            data=task_data.model_dump(exclude_none=True),
-            task_id=task_id,
-            sessionid=self.session_id
-        )
-        
-        # 返回更新后的任务信息
-        return self.get_task_by_id(task_id)
-    
-    def assign_task(self, task_id: str, assign_data: TaskAssignRequest) -> TaskModel:
-        """分配任务
-        
-        Args:
-            task_id: 任务ID
-            assign_data: 任务分配请求数据
-            
-        Returns:
-            更新后的任务信息
-            
-        Raises:
-            ZenTaoError: 分配任务失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能分配任务")
-        
-        response = self.post(
-            endpoint='task-assignTo-{task_id}-{sessionid}.json',
-            response_model=CommonOperationResponse,
-            data=assign_data.model_dump(exclude_none=True),
-            task_id=task_id,
-            sessionid=self.session_id
-        )
-        
-        # 返回更新后的任务信息
-        return self.get_task_by_id(task_id)
-    
     def start_task(self, task_id: str) -> bool:
         """开始任务
         
@@ -290,8 +199,11 @@ class TaskClient(BaseClient):
             是否开始成功
             
         Raises:
-            ZenTaoError: 开始任务失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("开始任务功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能开始任务")
         
@@ -317,8 +229,11 @@ class TaskClient(BaseClient):
             是否完成成功
             
         Raises:
-            ZenTaoError: 完成任务失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("完成任务功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能完成任务")
         
@@ -345,8 +260,11 @@ class TaskClient(BaseClient):
             是否关闭成功
             
         Raises:
-            ZenTaoError: 关闭任务失败
+            NotImplementedError: 该功能暂未验证，不建议使用
         """
+        raise NotImplementedError("关闭任务功能暂未验证，不建议使用")
+        
+        # 以下代码保留作为参考，但暂时不可用
         if not self.session_id:
             raise ValueError("需要先登录才能关闭任务")
         
@@ -365,109 +283,3 @@ class TaskClient(BaseClient):
             return True
         except Exception:
             return False
-    
-    def cancel_task(self, task_id: str, comment: Optional[str] = None) -> bool:
-        """取消任务
-        
-        Args:
-            task_id: 任务ID
-            comment: 取消备注
-            
-        Returns:
-            是否取消成功
-            
-        Raises:
-            ZenTaoError: 取消任务失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能取消任务")
-        
-        data = {}
-        if comment:
-            data['comment'] = comment
-        
-        try:
-            self.post(
-                endpoint='task-cancel-{task_id}-{sessionid}.json',
-                response_model=CommonOperationResponse,
-                data=data if data else None,
-                task_id=task_id,
-                sessionid=self.session_id
-            )
-            return True
-        except Exception:
-            return False
-    
-    def pause_task(self, task_id: str, comment: Optional[str] = None) -> bool:
-        """暂停任务
-        
-        Args:
-            task_id: 任务ID
-            comment: 暂停备注
-            
-        Returns:
-            是否暂停成功
-            
-        Raises:
-            ZenTaoError: 暂停任务失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能暂停任务")
-        
-        data = {}
-        if comment:
-            data['comment'] = comment
-        
-        try:
-            self.post(
-                endpoint='task-pause-{task_id}-{sessionid}.json',
-                response_model=CommonOperationResponse,
-                data=data if data else None,
-                task_id=task_id,
-                sessionid=self.session_id
-            )
-            return True
-        except Exception:
-            return False
-    
-    def search_tasks(
-        self, 
-        keyword: str,
-        project_id: Optional[str] = None
-    ) -> List[TaskModel]:
-        """搜索任务
-        
-        Args:
-            keyword: 搜索关键词（任务名称、描述等）
-            project_id: 限定在某个项目内搜索
-            
-        Returns:
-            匹配的任务列表
-            
-        Raises:
-            ZenTaoError: 搜索任务失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能搜索任务")
-        
-        params = {'search': keyword}
-        
-        if project_id:
-            endpoint = 'project-task-{project_id}-{sessionid}.json'
-            response = self.get(
-                endpoint=endpoint,
-                response_model=TaskListResponse,
-                params=params,
-                project_id=project_id,
-                sessionid=self.session_id
-            )
-        else:
-            # 全局搜索任务
-            response = self.get(
-                endpoint='task-browse-{sessionid}.json',
-                response_model=TaskListResponse,
-                params=params,
-                sessionid=self.session_id
-            )
-        
-        return response.get_task_list()
