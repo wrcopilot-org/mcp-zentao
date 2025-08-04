@@ -159,7 +159,31 @@ class BugClient(BaseClient):
             sessionid=self.session_id
         )
         
-        return response.get_bug_data()
+        return response.get_bug()
+    
+    def get_bug_detail(self, bug_id: str) -> BugDetailResponse:
+        """获取缺陷完整详情响应（包含用户映射、产品映射等附加信息）
+        
+        Args:
+            bug_id: 缺陷ID
+            
+        Returns:
+            缺陷详情响应对象，包含附加信息
+            
+        Raises:
+            ZenTaoError: 获取缺陷详情失败
+        """
+        if not self.session_id:
+            raise ValueError("需要先登录才能获取缺陷详情")
+        
+        response = self.get(
+            endpoint='bug-view-{bug_id}-{sessionid}.json',
+            response_model=BugDetailResponse,
+            bug_id=bug_id,
+            sessionid=self.session_id
+        )
+        
+        return response
     
     def create_bug(self, bug_data: BugCreateRequest) -> BugModel:
         """创建新缺陷

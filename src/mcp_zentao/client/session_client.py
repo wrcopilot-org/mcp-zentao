@@ -6,7 +6,7 @@
 
 from typing import Optional
 from .base_client import BaseClient
-from ..models.session import SessionResponse, LoginRequest, LoginResponse
+from ..models.session import SessionResponse, LoginRequest, LoginResponse, LogoutResponse
 from ..models.user import UserDetailResponse
 
 
@@ -95,15 +95,16 @@ class SessionClient(BaseClient):
         
         try:
             # 发起登出请求
-            self.get(
+            response = self.get(
                 endpoint='user-logout-{sessionid}.json',
-                response_model=LoginResponse,  # 复用登录响应模型
+                response_model=LogoutResponse,
                 sessionid=self.session_id
             )
             
             # 清除会话ID
             self.session_id = None
-            return True
+            # 根据响应状态判断是否成功
+            return response.status == "success"
             
         except Exception:
             # 登出失败，但仍然清除本地会话ID

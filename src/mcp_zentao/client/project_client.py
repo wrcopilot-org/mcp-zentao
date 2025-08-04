@@ -4,11 +4,11 @@
 提供项目查询、创建、编辑等功能。
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from .base_client import BaseClient
 from ..models.project import (
     ProjectListResponse, ProjectModel, ProjectCreateRequest, 
-    ProjectEditRequest, ProjectDetailResponse
+    ProjectEditRequest, ProjectDetailResponse, ProjectTaskResponse
 )
 from ..models.common import CommonOperationResponse
 
@@ -327,3 +327,27 @@ class ProjectClient(BaseClient):
         )
         
         return response.get_project_list()
+
+    def get_project_tasks(self, project_id: str) -> ProjectTaskResponse:
+        """获取项目任务详情
+        
+        Args:
+            project_id: 项目ID
+            
+        Returns:
+            项目任务响应对象，包含项目信息、任务列表、团队成员等
+            
+        Raises:
+            ZenTaoError: 获取项目任务失败
+        """
+        if not self.session_id:
+            raise ValueError("需要先登录才能获取项目任务")
+        
+        response = self.get(
+            endpoint='project-task-{project_id}-{sessionid}.json',
+            response_model=ProjectTaskResponse,
+            project_id=project_id,
+            sessionid=self.session_id
+        )
+        
+        return response

@@ -4,7 +4,7 @@
 提供任务查询、创建、编辑、状态变更等功能。
 """
 
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from .base_client import BaseClient
 from ..models.task import (
     TaskListResponse, TaskModel, TaskCreateRequest, TaskEditRequest,
@@ -137,7 +137,7 @@ class TaskClient(BaseClient):
         
         return response.get_task_list()
     
-    def get_task_by_id(self, task_id: str) -> TaskModel:
+    def get_task_by_id(self, task_id: str) -> Dict[str, Any]:
         """根据任务ID获取任务详细信息
         
         Args:
@@ -159,7 +159,31 @@ class TaskClient(BaseClient):
             sessionid=self.session_id
         )
         
-        return response.get_task_data()
+        return response.get_task()
+    
+    def get_task_detail(self, task_id: str) -> TaskDetailResponse:
+        """获取任务完整详情响应（包含项目信息、用户映射等附加信息）
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            任务详情响应对象，包含附加信息
+            
+        Raises:
+            ZenTaoError: 获取任务详情失败
+        """
+        if not self.session_id:
+            raise ValueError("需要先登录才能获取任务详情")
+        
+        response = self.get(
+            endpoint='task-view-{task_id}-{sessionid}.json',
+            response_model=TaskDetailResponse,
+            task_id=task_id,
+            sessionid=self.session_id
+        )
+        
+        return response
     
     def create_task(self, task_data: TaskCreateRequest) -> TaskModel:
         """创建新任务
