@@ -258,9 +258,9 @@ class ZenTaoMCPServer:
                 status_text = bug.get_status_display_with_emoji()
                 severity_text = bug.get_severity_display_with_emoji()
                 
-                result += f"{i:3d}. [{bug.id:>6}] {bug.title}\n"
+                result += f"  {i}. **[{bug.id}]** {bug.title}\n"
                 result += f"     状态: {status_text:<8} | 严重程度: {severity_text:<8}\n"
-                result += f"     产品: {bug.product or '未指定':<20} | 指派给: {bug.assignedTo or '未指派'}\n"
+                result += f"     指派给: {bug.assignedTo or '未指派'}\n"
                 if bug.openedDate:
                     result += f"     创建时间: {bug.openedDate}\n"
                 result += f"     {'─' * 50}\n"
@@ -345,8 +345,6 @@ class ZenTaoMCPServer:
             
             if bug.os:
                 result += f"💻 操作系统: {bug.os}\n"
-            if bug.browser:
-                result += f"🌐 浏览器: {bug.browser}\n"
             if bug.assignedDate:
                 result += f"⏰ 指派时间: {bug.assignedDate}\n"
                 
@@ -359,12 +357,28 @@ class ZenTaoMCPServer:
             result += "-" * 40 + "\n"
             
             if bug.steps:
-                # 简单清理HTML标签
                 import re
-                cleaned_steps = re.sub(r'<[^>]+>', '', bug.steps)
-                cleaned_steps = cleaned_steps.replace('&nbsp;', ' ').replace('&lt;', '<').replace('&gt;', '>').replace('&amp;', '&')
-                cleaned_steps = '\n'.join(line.strip() for line in cleaned_steps.split('\n') if line.strip())
-                result += f"{cleaned_steps}\n"
+                html_content = bug.steps
+                
+                # 处理图片标签，转换为markdown格式，参考BugDetailData.display_summary的方式
+                zentao_base_url = client.base_url
+                
+                # 先处理以/zentao/开头的相对路径图片
+                html_content = re.sub(
+                    r'<img[^>]*src="/zentao/([^"]*)"[^>]*>', 
+                    f'![图片]({zentao_base_url}/\\1)', 
+                    html_content
+                )
+                
+                # 使用BugDetailData的静态方法清理HTML内容
+                from mcp_zentao.models.bug import BugDetailData
+                cleaned_steps = BugDetailData._clean_html_content(html_content)
+                
+                # 分割为行并添加到输出
+                for line in cleaned_steps.split("\n"):
+                    line = line.strip()
+                    if line:
+                        result += f"{line}\n"
             else:
                 result += "暂无重现步骤描述\n"
             result += "\n"

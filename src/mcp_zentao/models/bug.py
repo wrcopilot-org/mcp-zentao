@@ -3,7 +3,8 @@
 定义禅道缺陷相关的数据结构
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+from pydantic import field_validator
 from typing import Optional, List, Dict, Any
 from enum import Enum
 from collections import OrderedDict
@@ -51,18 +52,20 @@ class BugSeverity(int, Enum):
 
 class BugPriority(int, Enum):
     """缺陷优先级枚举"""
-    LOWEST = 1    # 最低
-    LOW = 2       # 低
-    NORMAL = 3    # 正常
-    HIGH = 4      # 高
+    NONE = 0      # 无优先级
+    HIGH = 1      # 高
+    NORMAL = 2    # 中
+    LOW = 3       # 低
+    URGENT = 4    # 紧急
     
     def __str__(self) -> str:
         """返回中文描述"""
         return {
-            1: "最低",
-            2: "低",
-            3: "中", 
-            4: "高"
+            0: "无",
+            1: "高",
+            2: "中", 
+            3: "低",
+            4: "紧急"
         }.get(self.value, f"级别{self.value}")
     
     def __repr__(self) -> str:
@@ -72,9 +75,10 @@ class BugPriority(int, Enum):
     def emoji(self) -> str:
         """优先级对应的emoji"""
         return {
-            1: "🟢",
+            0: "⚪",
+            1: "🟠",
             2: "🟡",
-            3: "🟠", 
+            3: "🟢",
             4: "🔥"
         }.get(self.value, "📊")
     
@@ -82,10 +86,11 @@ class BugPriority(int, Enum):
     def display_text(self) -> str:
         """带表情符号的显示文本"""
         return {
-            1: "🟢最低",
-            2: "🟡低",
-            3: "🟠中", 
-            4: "🔥高"
+            0: "⚪无",
+            1: "🟠高",
+            2: "🟡中", 
+            3: "🟢低",
+            4: "🔥紧急"
         }.get(self.value, f"📊级别{self.value}")
 
 
@@ -110,7 +115,7 @@ class BugStatus(str, Enum):
     def display_text(self) -> str:
         """带表情符号的显示文本"""
         return {
-            "active": "🔴激活",
+            "active": "🟠激活",
             "resolved": "🟡已解决", 
             "closed": "🟢已关闭"
         }.get(self.value, f"📊{self.value}")
@@ -405,10 +410,11 @@ class BugModel(BaseModel):
     def _get_priority_display(self) -> str:
         """获取优先级的中文显示"""
         priority_map = {
-            BugPriority.LOWEST: "低",
-            BugPriority.LOW: "低",
+            BugPriority.NONE: "无",
+            BugPriority.HIGH: "高",
             BugPriority.NORMAL: "中", 
-            BugPriority.HIGH: "高"
+            BugPriority.LOW: "低",
+            BugPriority.URGENT: "紧急"
         }
         return priority_map.get(self.pri, str(self.pri.value))
 
