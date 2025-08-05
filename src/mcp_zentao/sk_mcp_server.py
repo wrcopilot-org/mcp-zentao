@@ -18,11 +18,12 @@
     # 启动 SSE MCP server (HTTP)
     python -m mcp_zentao.sk_mcp_server --transport sse --port 8080
 """
-
+import os
 import sys
 import logging
 from typing import Literal, Optional, List, Dict, Any
 from pydantic import BaseModel, Field
+from dotenv import load_dotenv
 
 from semantic_kernel import Kernel
 from semantic_kernel.functions import kernel_function
@@ -904,7 +905,7 @@ def create_server(base_url: str, timeout: float = 30.0) -> ZenTaoMCPServer:
 def run(
     transport: Literal["sse", "stdio"] = "stdio", 
     port: Optional[int] = None,
-    base_url: str = "http://localhost:8080",
+    base_url: str = None,
     timeout: float = 30.0
 ) -> None:
     """运行禅道 MCP 服务器
@@ -912,11 +913,36 @@ def run(
     Args:
         transport: 传输协议，支持 "sse" 或 "stdio"
         port: SSE 服务器端口（仅在 transport="sse" 时使用）
-        base_url: 禅道服务器基础URL
+        base_url: 禅道服务器基础URL，如果未提供则从环境变量ZENTAO_HOST读取
         timeout: 请求超时时间
+        auto_login: 是否在启动时自动登录（从环境变量读取用户名密码）
     """
+    # 加载环境变量
+    load_dotenv()
+    
+    # 从环境变量获取配置
+    if base_url is None:
+        base_url = os.getenv("ZENTAO_HOST")
+        if not base_url:
+            logger.error("未提供base_url参数，且环境变量ZENTAO_HOST也未设置")
+            raise ValueError("必须提供base_url参数或设置环境变量ZENTAO_HOST")
+    
     # 创建禅道 MCP 服务器
     zentao_server = create_server(base_url=base_url, timeout=timeout)
+    
+    # 尝试自动登录
+    username = os.getenv("ZENTAO_ACCOUNT")
+    password = os.getenv("ZENTAO_PASSWORD")
+    
+    if username and password:
+        try:
+            login_result = zentao_server.login(username, password)
+            logger.info(f"自动登录结果: {login_result}")
+        except Exception as e:
+            logger.warning(f"自动登录失败: {e}，服务器将正常启动但需要手动登录")
+    else:
+        logger.info("未找到登录凭据环境变量(ZENTAO_ACCOUNT/ZENTAO_PASSWORD)，跳过自动登录")
+    
     mcp_server = zentao_server.as_mcp_server("zentao-mcp-server")
     
     logger.info(f"启动禅道 MCP 服务器，传输协议: {transport}")
@@ -993,8 +1019,7 @@ def main() -> None:
     parser.add_argument(
         "--base-url",
         type=str,
-        default="http://localhost:8080", 
-        help="禅道服务器基础URL（默认: http://localhost:8080）"
+        help="禅道服务器基础URL（如未提供将从环境变量ZENTAO_HOST读取）"
     )
     parser.add_argument(
         "--timeout",
