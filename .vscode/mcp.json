@@ -14,6 +14,20 @@
 				"ZENTAO_HOST": "http://192.168.2.84/zentao/"
 			}
 		}
+		// "mcp-zentao": {
+		// 	"type": "stdio",
+		// 	"command": "uvx",
+		// 	"args": [
+		// 		"--from",
+		// 		"git+https://github.com/wrcopilot-org/mcp-zentao",
+		// 		"mcp-zentao"
+		// 	],
+		// 	"env": {
+		// 		"ZENTAO_ACCOUNT": "lianping",
+		// 		"ZENTAO_PASSWORD": "123456",
+		// 		"ZENTAO_HOST": "http://192.168.2.84/zentao/"
+		// 	}
+		// }
 	},
 	"inputs": []
 }
