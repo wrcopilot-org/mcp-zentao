@@ -1,0 +1,19 @@
+{
+	"servers": {
+		"mcp-zentao": {
+			"type": "stdio",
+			"command": "uv",
+			"args": [
+				"--directory=${workspaceFolder}",
+				"run",
+				"mcp-zentao"
+			],
+			"env": {
+				"ZENTAO_ACCOUNT": "lianping",
+				"ZENTAO_PASSWORD": "123456",
+				"ZENTAO_HOST": "http://192.168.2.84/zentao/"
+			}
+		}
+	},
+	"inputs": []
+}

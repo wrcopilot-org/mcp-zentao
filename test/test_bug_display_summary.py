@@ -37,7 +37,7 @@ class TestBugDisplaySummary:
         
         # 登录
         params = {
-            "account": os.getenv("ZENTAO_ACCOUNT", "weijiapeng"),
+            "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
             "password": os.getenv("ZENTAO_PASSWORD", "123456"),
         }
         resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)
@@ -95,7 +95,7 @@ class TestBugDisplaySummary:
         
         # 登录
         params = {
-            "account": os.getenv("ZENTAO_ACCOUNT", "weijiapeng"),
+            "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
             "password": os.getenv("ZENTAO_PASSWORD", "123456"),
         }
         resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)
