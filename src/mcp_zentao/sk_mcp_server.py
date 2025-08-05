@@ -251,9 +251,10 @@ class ZenTaoMCPServer:
                 # 使用模型的显示方法
                 result += f"  {i}. **[{bug.id}]** {bug.title}\n"
                 result += f"     创建时间: {bug.openedDate}\n"
-                result += f"     优先级: {bug.get_priority_display_with_emoji()}\n"
+                result += f"     级别: {bug.get_severity_display()}\n"
+                result += f"     优先级: {bug.get_priority_display()}\n"
                 result += f"     指派给: {bug.assignedTo or '未指派'}\n"
-                result += f"     解决: {bug.resolvedBy or '未指派'}\n"
+                result += f"     解决: {bug.resolvedBy or ''}\n"
                 result += f"     方案: {bug.get_resolution_display()}\n"
                 result += f"     {'─' * 50}\n"
             
