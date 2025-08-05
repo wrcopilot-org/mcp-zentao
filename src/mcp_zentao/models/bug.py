@@ -435,9 +435,7 @@ class BugDetailData(BaseModel):
                 size_kb = round(int(size) / 1024, 2) if size.isdigit() else "未知"
                 
                 # 生成下载链接
-                download_url = f"{zentao_base_url}file-download-{file_id}.html"
-                if session_id:
-                    download_url += f"?zentaosid={session_id}"
+                download_url = f"{zentao_base_url}file-download-{file_id}.html?zentaosid={session_id}"
                 
                 lines.append(f"- [{title} ({size_kb}K)]({download_url})")
             lines.append("")
