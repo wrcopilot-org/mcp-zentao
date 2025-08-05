@@ -37,7 +37,7 @@ class TestBugDisplaySummary:
         
         # 登录
         params = {
-            "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
+            "account": os.getenv("ZENTAO_ACCOUNT", "weijiapeng"),
             "password": os.getenv("ZENTAO_PASSWORD", "123456"),
         }
         resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)
@@ -63,7 +63,7 @@ class TestBugDisplaySummary:
             zentao_base_url=ZENTAO_HOST.base_url
         )
         print("\n" + "="*60)
-        print("Bug 36151 Detail Display Summary:")
+        print(f"{resp.url}")
         print("="*60)
         print(summary)
         print("="*60)
@@ -95,7 +95,7 @@ class TestBugDisplaySummary:
         
         # 登录
         params = {
-            "account": os.getenv("ZENTAO_ACCOUNT", "lianping"),
+            "account": os.getenv("ZENTAO_ACCOUNT", "weijiapeng"),
             "password": os.getenv("ZENTAO_PASSWORD", "123456"),
         }
         resp = ZENTAO_HOST.get(f"/user-login-{session_id}.json", params=params)
@@ -115,7 +115,7 @@ class TestBugDisplaySummary:
         bug_list = bug_list_response.get_bug_list()
         
         print("\n" + "="*60)
-        print(f"My Bug List Display Summary (共 {len(bug_list)} 个Bug):")
+        print(f"{resp.url} (当前页共 {len(bug_list)} 个Bug):")
         print("="*60)
         
         # 显示前5个Bug的摘要

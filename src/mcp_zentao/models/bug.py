@@ -365,6 +365,10 @@ class BugDetailData(BaseModel):
     
     def display_summary(self, session_id: str, zentao_base_url: str = "http://192.168.2.84/zentao") -> str:
         """生成markdown格式的Bug详情摘要"""
+        # 获取用户真实姓名
+        def get_user_name(username: str) -> str:
+            return self.users.get(username, username) if username else ""
+        
         lines = []
         
         # 标题
@@ -380,10 +384,6 @@ class BugDetailData(BaseModel):
         
         # 获取模块路径
         module_path = " > ".join([m.get("name", "") for m in self.modulePath if m.get("name")])
-        
-        # 获取用户真实姓名
-        def get_user_name(username: str) -> str:
-            return self.users.get(username, username) if username else ""
         
         # 基本信息表格
         lines.append("| 字段 | 值 |")
@@ -461,7 +461,8 @@ class BugDetailData(BaseModel):
                     "assigned": "指派给",
                     "resolved": "解决",
                     "closed": "关闭",
-                    "activated": "激活"
+                    "activated": "激活",
+                    "edited": "编辑",
                 }.get(action_type, action_type)
                 
                 lines.append(f"**{date}** - **{actor}** {action_desc}")
