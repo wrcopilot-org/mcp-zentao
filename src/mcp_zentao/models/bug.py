@@ -144,8 +144,8 @@ class BugType(str, Enum):
     
     # 中文系统特有的类型代码
     GNWT = "gnwt"                  # 功能问题
-    LSYL = "lsyl"                  # 历史遗留
-    JMLJ = "jmlj"                  # 界面交互
+    LWT = "lwt"                    # 历史遗留
+    JMLJ = "jmlj"                  # 界面交互  
     JMYH = "jmyh"                  # 界面优化
     XNWT = "xnwt"                  # 性能问题
     JRXWT = "jrxwt"                # 兼容性问题
@@ -172,10 +172,8 @@ class BugType(str, Enum):
             "others": "其他",
             # 中文系统特有类型
             "gnwt": "功能问题",
-            "lsyl": "历史遗留",
+            "lwt": "历史遗留",
             "jmlj": "界面交互",
-            "lwt": "逻辑问题", 
-            "sjqx": "数据缺陷",
             "jmyh": "界面优化",
             "xnwt": "性能问题",
             "jrxwt": "兼容性问题",
