@@ -1,7 +1,7 @@
 [project]
 name = "mcp-zentao"
-version = "0.1.0"
-description = "Add your description here"
+version = "1.0.0"
+description = "v11.7 禅道系统 MCP 服务器"
 readme = "README.md"
 authors = [
     { name = "nblog" }

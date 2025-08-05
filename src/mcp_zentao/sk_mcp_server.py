@@ -962,9 +962,9 @@ def run(
         # 创建 Starlette 应用
         async def get_info(request):
             return JSONResponse({
-                "name": "zentao-mcp-server",
+                "name": "mcp-zentao",
                 "version": "1.0.0",
-                "description": "禅道系统 MCP 服务器，提供项目管理、任务跟踪和缺陷管理功能"
+                "description": "禅道系统 MCP 服务器，提供缺陷管理、任务跟踪和项目管理功能"
             })
         
         starlette_app = Starlette(
