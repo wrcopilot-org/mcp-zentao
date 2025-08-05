@@ -11,10 +11,42 @@ from collections import OrderedDict
 
 class BugSeverity(int, Enum):
     """缺陷严重程度枚举"""
-    LOWEST = 1    # 1-建议
-    LOW = 2       # 2-一般
-    NORMAL = 3    # 3-重要
-    HIGH = 4      # 4-严重
+    LOWEST = 1
+    LOW = 2 
+    NORMAL = 3
+    HIGH = 4
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            1: "提示",
+            2: "其他", 
+            3: "一般",
+            4: "严重"
+        }.get(self.value, f"级别{self.value}")
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    @property
+    def emoji(self) -> str:
+        """严重程度对应的emoji"""
+        return {
+            1: "💡",
+            2: "⚡", 
+            3: "⚠️",
+            4: "🚨"
+        }.get(self.value, "📊")
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return {
+            1: "💡提示",
+            2: "⚡其他", 
+            3: "⚠️一般",
+            4: "🚨严重"
+        }.get(self.value, f"📊级别{self.value}")
 
 
 class BugPriority(int, Enum):
@@ -23,6 +55,38 @@ class BugPriority(int, Enum):
     LOW = 2       # 低
     NORMAL = 3    # 正常
     HIGH = 4      # 高
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            1: "最低",
+            2: "低",
+            3: "中", 
+            4: "高"
+        }.get(self.value, f"级别{self.value}")
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    @property
+    def emoji(self) -> str:
+        """优先级对应的emoji"""
+        return {
+            1: "🟢",
+            2: "🟡",
+            3: "🟠", 
+            4: "🔥"
+        }.get(self.value, "📊")
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return {
+            1: "🟢最低",
+            2: "🟡低",
+            3: "🟠中", 
+            4: "🔥高"
+        }.get(self.value, f"📊级别{self.value}")
 
 
 class BugStatus(str, Enum):
@@ -30,6 +94,26 @@ class BugStatus(str, Enum):
     ACTIVE = "active"      # 激活
     RESOLVED = "resolved"  # 已解决
     CLOSED = "closed"      # 已关闭
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            "active": "激活",
+            "resolved": "已解决", 
+            "closed": "已关闭"
+        }.get(self.value, self.value)
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return {
+            "active": "🔴激活",
+            "resolved": "🟡已解决", 
+            "closed": "🟢已关闭"
+        }.get(self.value, f"📊{self.value}")
 
 
 class BugType(str, Enum):
@@ -49,6 +133,30 @@ class BugType(str, Enum):
     JMLJ = "jmlj"                  # 界面逻辑
     LWT = "lwt"                    # 逻辑问题
     SJQX = "sjqx"                  # 数据缺陷
+    JMYH = "jmyh"                  # 界面优化
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            "codeerror": "代码错误",
+            "interface": "界面优化", 
+            "config": "配置相关",
+            "install": "安装部署",
+            "security": "安全相关",
+            "performance": "性能问题",
+            "standard": "标准规范",
+            "automation": "测试脚本",
+            "others": "其他",
+            # 中文系统特有类型
+            "gnwt": "功能问题",
+            "jmlj": "界面交互",
+            "lwt": "逻辑问题", 
+            "sjqx": "数据缺陷",
+            "jmyh": "界面优化",
+        }.get(self.value, self.value)
+    
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class BugResolution(str, Enum):
@@ -60,6 +168,21 @@ class BugResolution(str, Enum):
     DUPLICATE = "duplicate"        # 重复Bug
     EXTERNAL = "external"          # 外部原因
     NOTREPRO = "notrepro"          # 无法重现
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            "fixed": "已修复",
+            "postponed": "延期处理", 
+            "willnotfix": "不予修复",
+            "bydesign": "设计如此",
+            "duplicate": "重复Bug",
+            "external": "外部原因",
+            "notrepro": "无法重现"
+        }.get(self.value, self.value)
+    
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class BugModel(BaseModel):
@@ -145,6 +268,21 @@ class BugModel(BaseModel):
     # 文件附件（仅在详情响应中存在）
     files: Optional[Dict[str, Dict[str, Any]]] = Field(default=None, description="附件文件列表")
     
+    @field_validator('files', mode='before')
+    @classmethod
+    def validate_files(cls, v):
+        """处理 files 字段的不同格式"""
+        if v is None or v == "":
+            return None
+        # 如果是空列表，转换为 None
+        if isinstance(v, list) and len(v) == 0:
+            return None
+        # 如果是列表但不为空，需要转换为字典格式
+        if isinstance(v, list):
+            # 这里可以根据实际需要进行处理
+            return None
+        return v
+    
     @field_validator('resolution', mode='before')
     @classmethod
     def validate_resolution(cls, v):
@@ -152,6 +290,89 @@ class BugModel(BaseModel):
         if v == "" or v is None:
             return None
         return v
+
+    def get_type_display(self) -> str:
+        """获取类型的中文显示"""
+        if not self.type:
+            return "未指定"
+        
+        # 如果是字符串格式的枚举值，直接使用映射
+        if isinstance(self.type, str):
+            try:
+                return BugType(self.type).__str__()
+            except ValueError:
+                return self.type
+        elif isinstance(self.type, BugType):
+            return str(self.type)
+        else:
+            return str(self.type)
+    
+    def get_severity_display(self) -> str:
+        """获取严重程度的中文显示"""
+        if isinstance(self.severity, BugSeverity):
+            return str(self.severity)
+        elif isinstance(self.severity, int):
+            return BugSeverity(self.severity).__str__()
+        return str(self.severity)
+    
+    def get_severity_display_with_emoji(self) -> str:
+        """获取严重程度的带表情符号显示"""
+        if isinstance(self.severity, BugSeverity):
+            return self.severity.display_text
+        elif isinstance(self.severity, int):
+            return BugSeverity(self.severity).display_text
+        return str(self.severity)
+    
+    def get_priority_display(self) -> str:
+        """获取优先级的中文显示"""
+        if isinstance(self.pri, BugPriority):
+            return str(self.pri)
+        elif isinstance(self.pri, int):
+            return BugPriority(self.pri).__str__()
+        return str(self.pri)
+    
+    def get_priority_display_with_emoji(self) -> str:
+        """获取优先级的带表情符号显示"""
+        if isinstance(self.pri, BugPriority):
+            return self.pri.display_text
+        elif isinstance(self.pri, int):
+            return BugPriority(self.pri).display_text
+        return str(self.pri)
+    
+    def get_status_display(self) -> str:
+        """获取状态的中文显示"""
+        if isinstance(self.status, BugStatus):
+            return str(self.status)
+        elif isinstance(self.status, str):
+            try:
+                return BugStatus(self.status).__str__()
+            except ValueError:
+                return self.status
+        return str(self.status)
+    
+    def get_status_display_with_emoji(self) -> str:
+        """获取状态的带表情符号显示"""
+        if isinstance(self.status, BugStatus):
+            return self.status.display_text
+        elif isinstance(self.status, str):
+            try:
+                return BugStatus(self.status).display_text
+            except ValueError:
+                return str(self.status)
+        return str(self.status)
+    
+    def get_resolution_display(self) -> str:
+        """获取解决方案的中文显示"""
+        if not self.resolution:
+            return ""
+        if isinstance(self.resolution, BugResolution):
+            return str(self.resolution)
+        elif isinstance(self.resolution, str):
+            try:
+                return BugResolution(self.resolution).__str__()
+            except ValueError:
+                return self.resolution
+        return str(self.resolution)
 
     def __repr__(self) -> str:
         """简洁的字符串表示"""

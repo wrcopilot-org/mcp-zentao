@@ -254,20 +254,9 @@ class ZenTaoMCPServer:
             result += "=" * 60 + "\n"
             
             for i, bug in enumerate(bugs, 1):
-                # 状态映射
-                status_text = {
-                    "active": "🔴激活",
-                    "resolved": "🟡已解决", 
-                    "closed": "🟢已关闭"
-                }.get(bug.status, f"📝{bug.status}")
-                
-                # 严重程度映射
-                severity_text = {
-                    1: "💡建议",
-                    2: "⚡一般",
-                    3: "⚠️重要",
-                    4: "🚨严重"
-                }.get(bug.severity, f"📊级别{bug.severity}")
+                # 使用模型的显示方法
+                status_text = bug.get_status_display_with_emoji()
+                severity_text = bug.get_severity_display_with_emoji()
                 
                 result += f"{i:3d}. [{bug.id:>6}] {bug.title}\n"
                 result += f"     状态: {status_text:<8} | 严重程度: {severity_text:<8}\n"
@@ -321,25 +310,12 @@ class ZenTaoMCPServer:
             result += "-" * 40 + "\n"
             
             # 状态和严重程度映射
-            status_text = {
-                "active": "🔴激活",
-                "resolved": "🟡已解决",
-                "closed": "🟢已关闭"
-            }.get(bug.status, f"📝{bug.status}")
-            
-            severity_text = {
-                1: "💡建议",
-                2: "⚡一般", 
-                3: "⚠️重要",
-                4: "🚨严重"
-            }.get(bug.severity, f"📊级别{bug.severity}")
-            
-            priority_text = {
-                1: "🟢最低",
-                2: "🟡低",
-                3: "🟠中", 
-                4: "🔥高"
-            }.get(bug.pri, f"📊级别{bug.pri}")
+            # 使用模型的显示方法，避免重复维护映射
+            status_text = bug.get_status_display_with_emoji()
+            severity_text = bug.get_severity_display_with_emoji()
+            priority_text = bug.get_priority_display_with_emoji()
+            type_text = bug.get_type_display()
+            resolution_text = bug.get_resolution_display()
             
             # 获取产品名称
             product_name = bug_detail_data.products.get(bug.product, f"产品ID-{bug.product}") if bug.product else "未指定"
@@ -358,7 +334,9 @@ class ZenTaoMCPServer:
             result += f"📊 状态: {status_text}\n"
             result += f"🎯 严重程度: {severity_text}\n"
             result += f"⭐ 优先级: {priority_text}\n"
-            result += f"🔧 Bug类型: {bug.type or '未指定'}\n"
+            result += f"🔧 Bug类型: {type_text}\n"
+            if resolution_text:
+                result += f"✅ 解决方案: {resolution_text}\n"
             result += f"👤 当前指派: {get_user_name(bug.assignedTo)}\n"
             result += f"👨‍💻 创建者: {get_user_name(bug.openedBy)}\n"
             result += f"📅 创建时间: {bug.openedDate or '未知'}\n"
@@ -506,7 +484,9 @@ class ZenTaoMCPServer:
             result += "─" * 40 + "\n"
             
             for bug in bugs:
-                severity_emoji = {1: "💡", 2: "⚡", 3: "⚠️", 4: "🚨"}.get(bug.severity, "📊")
+                # 使用模型方法获取严重程度表情符号
+                severity_display = bug.get_severity_display_with_emoji()
+                severity_emoji = severity_display.split(bug.get_severity_display())[0]  # 提取表情符号部分
                 result += f"{severity_emoji} [{bug.id}] {bug.title}\n"
             
             return result
@@ -601,13 +581,7 @@ class ZenTaoMCPServer:
                 }.get(task.status, f"📝{task.status}")
                 
                 # 优先级映射
-                pri_text = {
-                    0: "📝最低",
-                    1: "🟢低", 
-                    2: "🟡正常",
-                    3: "🟠高",
-                    4: "🚨最高"
-                }.get(task.pri, f"📊{task.pri}")
+                pri_text = task.priority.emoji + task.priority.value
                 
                 result += f"{i:3d}. [{task.id:>6}] {task.name}\n"
                 result += f"     状态: {status_text:<10} | 优先级: {pri_text:<8}\n"
@@ -661,13 +635,7 @@ class ZenTaoMCPServer:
                 "cancel": "❌已取消"
             }.get(task.status, f"📝{task.status}")
             
-            pri_text = {
-                0: "📝最低优先级",
-                1: "🟢低优先级",
-                2: "🟡正常优先级", 
-                3: "🟠高优先级",
-                4: "🚨最高优先级"
-            }.get(task.pri, f"📊优先级{task.pri}")
+            pri_text = task.priority.display_text
             
             result = f"任务详细信息 - #{task.id}\n"
             result += "=" * 60 + "\n"
@@ -754,7 +722,7 @@ class ZenTaoMCPServer:
             result += "─" * 40 + "\n"
             
             for task in tasks:
-                pri_emoji = {0: "📝", 1: "🟢", 2: "🟡", 3: "🟠", 4: "🚨"}.get(task.pri, "📊")
+                pri_emoji = task.get_priority_emoji()
                 result += f"{pri_emoji} [{task.id}] {task.name}\n"
             
             return result

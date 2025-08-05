@@ -38,6 +38,41 @@ class TaskPriority(int, Enum):
     NORMAL = 2    # 正常  
     HIGH = 3      # 高
     HIGHEST = 4   # 最高
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            0: "最低",
+            1: "低",
+            2: "正常", 
+            3: "高",
+            4: "最高"
+        }.get(self.value, f"级别{self.value}")
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return {
+            0: "📝最低",
+            1: "🟢低",
+            2: "🟡正常", 
+            3: "🟠高",
+            4: "🚨最高"
+        }.get(self.value, f"📊级别{self.value}")
+    
+    @property
+    def emoji(self) -> str:
+        """获取表情符号"""
+        return {
+            0: "📝",
+            1: "🟢",
+            2: "🟡", 
+            3: "🟠",
+            4: "🚨"
+        }.get(self.value, "📊")
 
 
 class TaskModel(BaseModel):
@@ -123,6 +158,10 @@ class TaskModel(BaseModel):
     def __repr__(self) -> str:
         """简洁的字符串表示"""
         return f"Task({self.id}: {self.name} - {self.status.value})"
+    
+    def get_priority_emoji(self) -> str:
+        """获取任务优先级对应的emoji"""
+        return self.priority.emoji
 
     def display_fields(self) -> OrderedDict[str, Any]:
         """返回与禅道界面字段匹配的有序字典"""
