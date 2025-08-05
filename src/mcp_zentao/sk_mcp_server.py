@@ -249,14 +249,12 @@ class ZenTaoMCPServer:
             
             for i, bug in enumerate(bugs, 1):
                 # 使用模型的显示方法
-                status_text = bug.get_status_display_with_emoji()
-                severity_text = bug.get_severity_display_with_emoji()
-                
                 result += f"  {i}. **[{bug.id}]** {bug.title}\n"
-                result += f"     状态: {status_text:<8} | 严重程度: {severity_text:<8}\n"
+                result += f"     创建时间: {bug.openedDate}\n"
+                result += f"     优先级: {bug.get_priority_display_with_emoji()}\n"
                 result += f"     指派给: {bug.assignedTo or '未指派'}\n"
-                if bug.openedDate:
-                    result += f"     创建时间: {bug.openedDate}\n"
+                result += f"     解决: {bug.resolvedBy or '未指派'}\n"
+                result += f"     方案: {bug.get_resolution_display()}\n"
                 result += f"     {'─' * 50}\n"
             
             return result

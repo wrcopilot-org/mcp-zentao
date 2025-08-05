@@ -264,6 +264,7 @@ class TaskModel(BaseModel):
 class TaskListData(BaseModel):
     """任务列表数据结构"""
     tasks: List[TaskModel] = Field(description="任务列表")
+    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
     
     def get_task_list(self) -> List[TaskModel]:
         """获取任务列表"""

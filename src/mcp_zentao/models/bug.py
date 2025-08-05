@@ -157,7 +157,7 @@ class BugType(str, Enum):
     SJQX = "sjqx"                  # 设计问题
     PZWT = "pzwt"                  # 配置问题
     QT = "qt"                      # 其他
-
+    
     def __str__(self) -> str:
         """返回中文描述"""
         return {
@@ -529,6 +529,7 @@ class BugModel(BaseModel):
 class BugListData(BaseModel):
     """缺陷列表数据结构"""
     bugs: List[BugModel] = Field(description="缺陷列表")
+    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
     
     def get_bug_list(self) -> List[BugModel]:
         """获取缺陷列表"""
