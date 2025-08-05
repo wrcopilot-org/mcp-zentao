@@ -10,10 +10,11 @@ requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.28.1",
     "pydantic>=2.11.7",
+    "semantic-kernel[mcp]>=1.32.2",
 ]
 
 [project.scripts]
-mcp-zentao = "mcp_zentao:main"
+mcp-zentao = "mcp_zentao.sk_mcp_server:main"
 
 [project.optional-dependencies]
 dev = [
