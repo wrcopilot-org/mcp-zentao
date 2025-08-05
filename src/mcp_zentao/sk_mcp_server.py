@@ -366,7 +366,7 @@ class ZenTaoMCPServer:
                 # 先处理以/zentao/开头的相对路径图片
                 html_content = re.sub(
                     r'<img[^>]*src="/zentao/([^"]*)"[^>]*>', 
-                    f'![图片]({zentao_base_url}/\\1)', 
+                    f'![图片]({zentao_base_url}\\1)', 
                     html_content
                 )
                 
@@ -403,7 +403,7 @@ class ZenTaoMCPServer:
                     file_icon = "🖼️" if extension in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] else "📄"
                     
                     # 构建下载链接
-                    download_url = f"{zentao_base_url}/file-download-{file_id}.html?zentaosid={session_id}"
+                    download_url = f"{zentao_base_url}file-download-{file_id}.html?zentaosid={session_id}"
                     
                     result += f"{file_icon} {title}\n"
                     result += f"   💾 大小: {size_kb}KB | 📎 格式: {extension.upper() or '未知'}\n"
