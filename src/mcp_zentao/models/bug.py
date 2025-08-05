@@ -115,9 +115,9 @@ class BugStatus(str, Enum):
     def display_text(self) -> str:
         """带表情符号的显示文本"""
         return {
-            "active": "🟠激活",
-            "resolved": "🟡已解决", 
-            "closed": "🟢已关闭"
+            "active": "🔥激活",
+            "resolved": "✅已解决", 
+            "closed": "🔒已关闭"
         }.get(self.value, f"📊{self.value}")
 
 
