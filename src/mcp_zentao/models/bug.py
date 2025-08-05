@@ -144,12 +144,20 @@ class BugType(str, Enum):
     
     # 中文系统特有的类型代码
     GNWT = "gnwt"                  # 功能问题
-    JMLJ = "jmlj"                  # 界面逻辑
-    LWT = "lwt"                    # 逻辑问题
-    SJQX = "sjqx"                  # 数据缺陷
+    LSYL = "lsyl"                  # 历史遗留
+    JMLJ = "jmlj"                  # 界面交互
     JMYH = "jmyh"                  # 界面优化
-    QT = "qt"                      # 其他类型
-    
+    XNWT = "xnwt"                  # 性能问题
+    JRXWT = "jrxwt"                # 兼容性问题
+    SJWT = "sjwt"                  # 随机问题
+    XGYR = "xgyr"                  # 修改引入
+    YHFK = "yhfk"                  # 用户反馈
+    XQJY = "xqjy"                  # 需求建议
+    XZXQ = "xzxq"                  # 新增需求
+    SJQX = "sjqx"                  # 设计问题
+    PZWT = "pzwt"                  # 配置问题
+    QT = "qt"                      # 其他
+
     def __str__(self) -> str:
         """返回中文描述"""
         return {
@@ -164,10 +172,20 @@ class BugType(str, Enum):
             "others": "其他",
             # 中文系统特有类型
             "gnwt": "功能问题",
+            "lsyl": "历史遗留",
             "jmlj": "界面交互",
             "lwt": "逻辑问题", 
             "sjqx": "数据缺陷",
             "jmyh": "界面优化",
+            "xnwt": "性能问题",
+            "jrxwt": "兼容性问题",
+            "sjwt": "随机问题",
+            "xgyr": "修改引入",
+            "yhfk": "用户反馈",
+            "xqjy": "需求建议",
+            "xzxq": "新增需求",
+            "sjqx": "设计问题",
+            "pzwt": "配置问题",
             "qt": "其他"
         }.get(self.value, self.value)
     
