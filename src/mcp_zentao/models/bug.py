@@ -330,15 +330,9 @@ class BugDetailData(BaseModel):
         """
         if not html_content:
             return ""
-            
-        import re
         
-        # 处理图片标签，转换为markdown
-        cleaned_text = re.sub(
-            r'<img[^>]*src="([^"]*)"[^>]*>', 
-            r'![图片](\1)', 
-            html_content
-        )
+        import re
+        cleaned_text = html_content
         
         # 处理段落标签
         cleaned_text = re.sub(r'<p[^>]*>', '\n', cleaned_text)
@@ -363,7 +357,7 @@ class BugDetailData(BaseModel):
         
         return cleaned_text.strip()
     
-    def display_summary(self, session_id: str, zentao_base_url: str = "http://192.168.2.84/zentao") -> str:
+    def display_summary(self, session_id: str, zentao_base_url: str = "http://192.168.2.84/zentao/") -> str:
         """生成markdown格式的Bug详情摘要"""
         # 获取用户真实姓名
         def get_user_name(username: str) -> str:
@@ -406,8 +400,19 @@ class BugDetailData(BaseModel):
         lines.append("")
         
         if self.bug.steps:
+            import re
+            # 处理图片标签，转换为markdown
+            html_content = self.bug.steps
+
+            # 先处理以/zentao/开头的相对路径图片
+            html_content = re.sub(
+                r'<img[^>]*src="/zentao/([^"]*)"[^>]*>', 
+                f'![图片]({zentao_base_url}\\1)', 
+                html_content
+            )
+
             # 使用静态方法清理HTML内容
-            cleaned_steps = self._clean_html_content(self.bug.steps)
+            cleaned_steps = self._clean_html_content(html_content)
             
             # 分割为行并添加到输出
             for line in cleaned_steps.split("\n"):
@@ -430,7 +435,7 @@ class BugDetailData(BaseModel):
                 size_kb = round(int(size) / 1024, 2) if size.isdigit() else "未知"
                 
                 # 生成下载链接
-                download_url = f"{zentao_base_url}/file-download-{file_id}.html"
+                download_url = f"{zentao_base_url}file-download-{file_id}.html"
                 if session_id:
                     download_url += f"?zentaosid={session_id}"
                 
