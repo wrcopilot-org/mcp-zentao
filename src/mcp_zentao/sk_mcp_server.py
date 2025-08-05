@@ -10,13 +10,6 @@
 - 缺陷管理
 - 任务管理
 - 项目管理
-
-使用方式：
-    # 启动 stdio MCP server
-    python -m mcp_zentao.sk_mcp_server
-
-    # 启动 SSE MCP server (HTTP)
-    python -m mcp_zentao.sk_mcp_server --transport sse --port 8080
 """
 import os
 import sys

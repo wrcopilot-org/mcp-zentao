@@ -28,19 +28,13 @@
 ### 1. STDIO 模式（默认）
 ```bash
 # 使用默认配置启动
-python -m mcp_zentao.sk_mcp_server
-
-# 指定禅道服务器地址
-python -m mcp_zentao.sk_mcp_server --base-url http://localhost/zentao/
-
-# 使用项目脚本
-mcp-zentao --base-url http://localhost/zentao/
+uvx --from git+https://github.com/wrcopilot-org/mcp-zentao mcp-zentao
 ```
 
 ### 2. SSE 模式（HTTP 服务器）
 ```bash
 # 启动 HTTP MCP 服务器
-python -m mcp_zentao.sk_mcp_server --transport sse --port 8080 --base-url http://localhost/zentao/
+uvx --from git+https://github.com/wrcopilot-org/mcp-zentao mcp-zentao --transport sse --port 8080 --base-url http://localhost/zentao/
 ```
 
 ## 功能使用示例
@@ -89,16 +83,29 @@ print(result)
 缺陷详细信息 - #1001
 ============================================================
 📋 标题: 登录页面无法正常显示
-📊 状态: 🔴激活
-🎯 严重程度: 🚨致命
-📦 所属产品: 用户管理系统
+
+## 📊 基本信息
+----------------------------------------
+🏷️ 所属产品: 用户管理系统
+📂 所属模块: 用户管理系统 > 其它
+📊 状态: 🔥激活
+🎯 严重程度: ⚠️一般
+⭐ 优先级: 🟢低
+🔧 Bug类型: 功能问题
 👤 指派给: 张三
 👨‍💻 创建者: 系统管理员
 📅 创建时间: 2024-01-15
-⏰ 截止时间: 2024-01-20
+🔄 激活次数: 0
+✅ 确认状态: 未确认
+⏰ 指派时间: 2024-01-15
 
-📝 详细描述:
-    ...
+## 🔄 重现步骤
+----------------------------------------
+   ...
+
+## 📋 历史记录
+----------------------------------------
+   ...
 ```
 
 ### 任务管理示例
