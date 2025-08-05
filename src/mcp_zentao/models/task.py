@@ -29,6 +29,44 @@ class TaskStatus(str, Enum):
     PAUSE = "pause"        # 已暂停
     CANCEL = "cancel"      # 已取消
     CLOSED = "closed"      # 已关闭
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            "wait": "未开始",
+            "doing": "进行中",
+            "done": "已完成",
+            "pause": "已暂停",
+            "cancel": "已取消",
+            "closed": "已关闭"
+        }.get(self.value, self.value)
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    @property
+    def emoji(self) -> str:
+        """状态对应的emoji"""
+        return {
+            "wait": "⏸️",
+            "doing": "🔄",
+            "done": "✅",
+            "pause": "⏯️",
+            "cancel": "❌",
+            "closed": "🔒"
+        }.get(self.value, "📝")
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return {
+            "wait": "⏸️未开始",
+            "doing": "🔄进行中",
+            "done": "✅已完成",
+            "pause": "⏯️已暂停",
+            "cancel": "❌已取消",
+            "closed": "🔒已关闭"
+        }.get(self.value, f"📝{self.value}")
 
 
 class TaskPriority(int, Enum):

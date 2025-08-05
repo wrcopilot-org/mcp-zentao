@@ -23,7 +23,8 @@ from semantic_kernel.functions import kernel_function
 
 from .client.zentao_client import ZenTaoClient
 from .models.user import UserModel
-from .models.session import LoginRequest
+from .models.bug import BugStatus
+from .models.task import TaskStatus
 
 
 # 配置日志
@@ -481,11 +482,12 @@ class ZenTaoMCPServer:
             if not bugs:
                 return f"📭 没有状态为'{status}'的缺陷"
             
-            status_emoji = {
-                "active": "🔴",
-                "resolved": "🟡", 
-                "closed": "🟢"
-            }.get(status, "📝")
+            # 使用枚举的emoji属性获取表情符号
+            try:
+                status_enum = BugStatus(status)
+                status_emoji = status_enum.emoji
+            except ValueError:
+                status_emoji = "📝"
             
             result = f"{status_emoji} {status.upper()} 状态缺陷（共 {len(bugs)} 个）\n"
             result += "─" * 40 + "\n"
@@ -716,14 +718,12 @@ class ZenTaoMCPServer:
             if not tasks:
                 return f"📭 没有状态为'{status}'的任务"
             
-            status_emoji = {
-                "wait": "⏸️",
-                "doing": "🔄",
-                "done": "✅",
-                "closed": "🔒",
-                "pause": "⏯️",
-                "cancel": "❌"
-            }.get(status, "📝")
+            # 使用枚举的emoji属性获取表情符号
+            try:
+                status_enum = TaskStatus(status)
+                status_emoji = status_enum.emoji
+            except ValueError:
+                status_emoji = "📝"
             
             result = f"{status_emoji} {status.upper()} 状态任务（共 {len(tasks)} 个）\n"
             result += "─" * 40 + "\n"

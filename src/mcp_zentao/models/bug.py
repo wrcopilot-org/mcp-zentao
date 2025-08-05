@@ -112,13 +112,22 @@ class BugStatus(str, Enum):
         return self.__str__()
     
     @property
+    def emoji(self) -> str:
+        """状态对应的emoji"""
+        return {
+            "active": "🔥",
+            "resolved": "✅",
+            "closed": "🔒"
+        }.get(self.value, "📝")
+    
+    @property
     def display_text(self) -> str:
         """带表情符号的显示文本"""
         return {
             "active": "🔥激活",
             "resolved": "✅已解决", 
             "closed": "🔒已关闭"
-        }.get(self.value, f"📊{self.value}")
+        }.get(self.value, f"🔍{self.value}")
 
 
 class BugType(str, Enum):
