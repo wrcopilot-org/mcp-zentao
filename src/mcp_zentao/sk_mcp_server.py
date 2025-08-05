@@ -73,12 +73,12 @@ class ZenTaoMCPServer:
         # 缺陷管理函数
         self.kernel.add_function("zentao_bugs", self.query_bug_list)
         self.kernel.add_function("zentao_bugs", self.query_bug_detail)
-        self.kernel.add_function("zentao_bugs", self.query_bugs_by_status)
+        # self.kernel.add_function("zentao_bugs", self.query_bugs_by_status)
         
         # 任务管理函数
         self.kernel.add_function("zentao_tasks", self.query_task_list)
         self.kernel.add_function("zentao_tasks", self.query_task_detail)
-        self.kernel.add_function("zentao_tasks", self.query_tasks_by_status)
+        # self.kernel.add_function("zentao_tasks", self.query_tasks_by_status)
 
         # 项目管理函数
         self.kernel.add_function("zentao_projects", self.query_project_list)
@@ -249,14 +249,14 @@ class ZenTaoMCPServer:
             
             for i, bug in enumerate(bugs, 1):
                 # 使用模型的显示方法
-                result += f"  {i}. **[{bug.id}]** {bug.title}\n"
-                result += f"     创建时间: {bug.openedDate}\n"
-                result += f"     级别: {bug.get_severity_display()}\n"
-                result += f"     优先级: {bug.get_priority_display()}\n"
-                result += f"     指派给: {bug.assignedTo or '未指派'}\n"
-                result += f"     解决: {bug.resolvedBy or ''}\n"
-                result += f"     方案: {bug.get_resolution_display()}\n"
-                result += f"     {'─' * 50}\n"
+                result += f"🏷️ {i}. **[{bug.id}]**: {bug.title}\n"
+                result += f"📅 创建时间: {bug.openedDate}\n"
+                result += f"🎯 级别: {bug.get_severity_display()}\n"
+                result += f"⭐ 优先级: {bug.get_priority_display_with_emoji()}\n"
+                result += f"👤 指派给: {bug.assignedTo or '未指派'}\n"
+                result += f"👨‍💻 解决: {bug.resolvedBy or ''}\n"
+                result += f"🔧 方案: {bug.get_resolution_display()}\n"
+                result += f" {'─' * 50}\n"
             
             return result
             
