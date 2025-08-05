@@ -148,6 +148,7 @@ class BugType(str, Enum):
     LWT = "lwt"                    # 逻辑问题
     SJQX = "sjqx"                  # 数据缺陷
     JMYH = "jmyh"                  # 界面优化
+    QT = "qt"                      # 其他类型
     
     def __str__(self) -> str:
         """返回中文描述"""
@@ -167,6 +168,7 @@ class BugType(str, Enum):
             "lwt": "逻辑问题", 
             "sjqx": "数据缺陷",
             "jmyh": "界面优化",
+            "qt": "其他"
         }.get(self.value, self.value)
     
     def __repr__(self) -> str:
