@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zentao-mcp-server"
+version = "1.0.0"
+description = "MCP server for Zentao project management system"
+authors = [{name = "Your Name", email = "your.email@example.com"}]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "mcp>=1.0.0",
+    "pymysql>=1.1.0",
+]
+
+[project.scripts]
+zentao-mcp-server = "src.server:main"
