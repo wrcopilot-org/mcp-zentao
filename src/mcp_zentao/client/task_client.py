@@ -111,16 +111,7 @@ class TaskClient(BaseClient):
         Raises:
             ZenTaoError: 获取任务信息失败
         """
-        if not self.session_id:
-            raise ValueError("需要先登录才能获取任务信息")
-        
-        response = self.get(
-            endpoint='task-view-{task_id}.json',
-            response_model=TaskDetailResponse,
-            task_id=task_id
-        )
-        
-        return response.get_task()
+        return self.get_task_detail(task_id).get_task()
     
     def get_task_detail(self, task_id: str) -> TaskDetailResponse:
         """获取任务完整详情响应（包含项目信息、用户映射等附加信息）
