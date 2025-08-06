@@ -130,7 +130,8 @@ class PaginationHelper:
         sort_key: str = "id_desc",
         rec_total: int = 0,
         rec_per_page: int = 20,
-        page_id: int = 1
+        page_id: int = 1,
+        operation: str = "assignedTo"
     ) -> str:
         """构建分页URL
         
@@ -140,12 +141,12 @@ class PaginationHelper:
             rec_total: 总记录数
             rec_per_page: 每页记录数
             page_id: 页码
-            
+            operation: 操作，如 'assignedTo', 'openedBy', 'resolvedBy', 'closedBy', 'finishedBy'
         Returns:
             分页URL，如 'my-task-assignedTo-id_desc-301-20-2.json'
         """
-        return f"{base_endpoint}-assignedTo-{sort_key}-{rec_total}-{rec_per_page}-{page_id}.json"
-    
+        return f"{base_endpoint}-{operation}-{sort_key}-{rec_total}-{rec_per_page}-{page_id}.json"
+
     @staticmethod
     def extract_pager_info(data: Dict[str, Any]) -> Optional[PagerInfo]:
         """从API响应数据中提取分页信息

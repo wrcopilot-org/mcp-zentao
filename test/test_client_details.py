@@ -570,46 +570,6 @@ class TestClientAPI:
         except Exception as e:
             test_project_id = "1"  # 后备方案
             logger.info(f"获取项目列表失败: {e}，使用默认ID: 1")
-        
-        try:
-            # 测试 get_project_tasks 方法
-            task_response = client.get_project_tasks(test_project_id)
-            
-            # 验证返回类型
-            assert isinstance(task_response, ProjectTaskResponse)
-            logger.info(f"✅ get_project_tasks 返回正确的 ProjectTaskResponse 类型")
-            
-            # 验证响应内容
-            assert task_response.status == "success"
-            logger.info(f"✅ 响应状态正确: {task_response.status}")
-            
-            # 验证可以获取项目信息
-            project_info = task_response.get_project_info()
-            assert isinstance(project_info, dict)
-            assert project_info["id"] == test_project_id
-            logger.info(f"✅ 项目信息获取成功: {project_info.get('name', 'N/A')}")
-            
-            # 验证可以获取任务列表
-            tasks = task_response.get_tasks()
-            assert isinstance(tasks, dict)
-            logger.info(f"✅ 任务列表获取成功: {len(tasks)} 个任务")
-            
-            # 验证可以获取团队成员
-            members = task_response.get_team_members()
-            assert isinstance(members, dict)
-            logger.info(f"✅ 团队成员获取成功: {len(members)} 个成员")
-            
-            # 验证可以获取统计摘要
-            summary = task_response.get_summary()
-            assert isinstance(summary, str)
-            logger.info(f"✅ 统计摘要获取成功: {summary}")
-            
-        except Exception as e:
-            logger.warning(f"⚠️ get_project_tasks 测试跳过: {e}")
-            # 验证方法存在且有正确的签名
-            assert hasattr(client, 'get_project_tasks')
-            assert callable(getattr(client, 'get_project_tasks'))
-            logger.info("✅ get_project_tasks 方法存在且可调用")
     
     def test_session_client_logout(self, authenticated_session):
         """测试会话客户端的 logout 方法"""

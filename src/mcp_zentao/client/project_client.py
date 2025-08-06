@@ -214,25 +214,48 @@ class ProjectClient(BaseClient):
         except Exception:
             return False
     
-    def get_project_tasks(self, project_id: str) -> ProjectTaskResponse:
-        """获取项目任务详情
+    # def get_project_tasks(self, project_id: str) -> ProjectTaskResponse:
+    #     """获取项目任务详情
         
-        Args:
-            project_id: 项目ID
+    #     Args:
+    #         project_id: 项目ID
             
-        Returns:
-            项目任务响应对象，包含项目信息、任务列表、团队成员等
+    #     Returns:
+    #         项目中的所有任务
             
-        Raises:
-            ZenTaoError: 获取项目任务失败
-        """
-        if not self.session_id:
-            raise ValueError("需要先登录才能获取项目任务")
+    #     Raises:
+    #         ZenTaoError: 获取项目任务失败
+    #     """
+    #     if not self.session_id:
+    #         raise ValueError("需要先登录才能获取项目任务")
         
-        response = self.get(
-            endpoint='project-task-{project_id}.json',
-            response_model=ProjectTaskResponse,
-            project_id=project_id
-        )
+    #     response = self.get(
+    #         endpoint='project-task-{project_id}.json',
+    #         response_model=ProjectTaskResponse,
+    #         project_id=project_id
+    #     )
         
-        return response
+    #     return response
+
+    # def get_project_bugs(self, project_id: str) -> ProjectBugResponse:
+    #     """获取项目相关的缺陷列表
+        
+    #     Args:
+    #         project_id: 项目ID
+            
+    #     Returns:
+    #         项目中的所有缺陷
+            
+    #     Raises:
+    #         ZenTaoError: 获取项目缺陷失败
+    #     """
+    #     if not self.session_id:
+    #         raise ValueError("需要先登录才能获取项目缺陷")
+        
+    #     response = self.get(
+    #         endpoint='project-bug-{project_id}.json',
+    #         response_model=ProjectBugResponse,
+    #         project_id=project_id
+    #     )
+        
+    #     return response

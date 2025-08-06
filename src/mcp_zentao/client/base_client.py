@@ -26,7 +26,7 @@ class BaseClient:
         """初始化基础客户端
         
         Args:
-            base_url: 禅道系统的基础URL，例如 http://zentao.example.com
+            base_url: 禅道系统的基础URL，例如 http://localhost/zentao/
             timeout: 请求超时时间，默认30秒
         """
         self.base_url = base_url.rstrip('/')
@@ -414,21 +414,6 @@ class BaseClient:
         """
         # 尝试不同的方式提取总记录数
         try:
-            # 对于任务响应
-            if hasattr(response, 'get_task_list_data'):
-                data = response.get_task_list_data()
-                return data.get('recTotal', 0)
-            
-            # 对于缺陷响应  
-            if hasattr(response, 'get_bug_list_data'):
-                data = response.get_bug_list_data()
-                return data.get('recTotal', 0)
-                
-            # 对于项目响应
-            if hasattr(response, 'get_project_list_data'):
-                data = response.get_project_list_data()
-                return data.get('recTotal', 0)
-                
             # 如果有data属性，尝试解析
             if hasattr(response, 'data') and response.data:
                 import json
