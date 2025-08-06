@@ -23,6 +23,38 @@ class ProjectStatus(str, Enum):
     DOING = "doing"        # 进行中
     SUSPENDED = "suspended" # 已挂起
     CLOSED = "closed"      # 已关闭
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            "wait": "未开始",
+            "doing": "进行中",
+            "suspended": "已挂起",
+            "closed": "已关闭"
+        }.get(self.value, self.value)
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
+    @property
+    def emoji(self) -> str:
+        """状态对应的emoji"""
+        return {
+            "wait": "⏸️",
+            "doing": "🔄",
+            "suspended": "⏯️",
+            "closed": "✅"
+        }.get(self.value, "📝")
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return {
+            "wait": "⏸️未开始",
+            "doing": "🔄进行中",
+            "suspended": "⏯️已挂起",
+            "closed": "✅已关闭"
+        }.get(self.value, f"📝{self.value}")
 
 
 class ProjectACL(str, Enum):
@@ -110,6 +142,14 @@ class ProjectModel(BaseModel):
     def __repr__(self) -> str:
         """简洁的字符串表示"""
         return f"Project({self.id}: {self.name} - {self.status.value})"
+    
+    def get_status_display(self) -> str:
+        """获取状态的中文显示"""
+        return str(self.status)
+    
+    def get_status_display_with_emoji(self) -> str:
+        """获取状态的带表情符号显示"""
+        return self.status.display_text
 
     def display_fields(self) -> OrderedDict[str, Any]:
         """返回与禅道界面字段匹配的有序字典"""

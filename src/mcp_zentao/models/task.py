@@ -199,7 +199,23 @@ class TaskModel(BaseModel):
     
     def get_priority_emoji(self) -> str:
         """获取任务优先级对应的emoji"""
-        return self.priority.emoji
+        return self.pri.emoji
+    
+    def get_priority_display(self) -> str:
+        """获取优先级的中文显示"""
+        return str(self.pri)
+    
+    def get_priority_display_with_emoji(self) -> str:
+        """获取优先级的带表情符号显示"""
+        return self.pri.display_text
+    
+    def get_status_display(self) -> str:
+        """获取状态的中文显示"""
+        return str(self.status)
+    
+    def get_status_display_with_emoji(self) -> str:
+        """获取状态的带表情符号显示"""
+        return self.status.display_text
 
     def display_fields(self) -> OrderedDict[str, Any]:
         """返回与禅道界面字段匹配的有序字典"""

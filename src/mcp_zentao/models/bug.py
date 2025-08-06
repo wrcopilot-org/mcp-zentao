@@ -238,6 +238,24 @@ class BugActionType(str, Enum):
             "activated": "激活",
             "edited": "编辑"
         }.get(self.value, self.value)
+    
+    @property
+    def emoji(self) -> str:
+        """操作类型对应的emoji"""
+        return {
+            "opened": "📌",
+            "commented": "💬",
+            "assigned": "👤",
+            "resolved": "✅",
+            "closed": "🔒",
+            "activated": "🔄",
+            "edited": "✏️"
+        }.get(self.value, "📝")
+    
+    @property
+    def display_text(self) -> str:
+        """带表情符号的显示文本"""
+        return f"{self.emoji}{str(self)}"
 
 
 class ActionHistoryItem(BaseModel):

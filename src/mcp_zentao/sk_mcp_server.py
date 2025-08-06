@@ -23,8 +23,10 @@ from semantic_kernel.functions import kernel_function
 
 from .client.zentao_client import ZenTaoClient
 from .models.user import UserModel
-from .models.bug import BugStatus
-from .models.task import TaskStatus
+from .models.bug import BugStatus, BugResolution
+from .models.task import TaskStatus, TaskPriority
+from .models.project import ProjectStatus
+from .constants import *
 
 
 # 配置日志
@@ -212,13 +214,8 @@ class ZenTaoMCPServer:
             # 根据状态参数确定查询参数
             status_param = None if status == "all" else status
             
-            # 确定排序键
-            sort_key_map = {
-                "latest": "id_desc",
-                "oldest": "id_asc", 
-                "priority": "pri_asc"
-            }
-            sort_key = sort_key_map.get(sort_order, "id_desc")
+            # 使用常量配置的排序映射
+            sort_key = BUG_SORT_KEY_MAPPING.get(sort_order, "id_desc")
             
             # 获取缺陷列表
             if limit > 0:
@@ -226,7 +223,7 @@ class ZenTaoMCPServer:
                 bugs = client.bugs.get_my_bugs(
                     status=status_param,
                     page=1,
-                    per_page=min(limit, 100),  # 最多一次获取100条
+                    per_page=min(limit, MAX_SINGLE_PAGE_SIZE),  # 使用常量
                     sort_key=sort_key
                 )
                 bugs = bugs[:limit]  # 截取指定数量
@@ -234,9 +231,9 @@ class ZenTaoMCPServer:
                 # 获取所有页面数据
                 bugs = client.bugs.get_my_bugs_all_pages(
                     status=status_param,
-                    per_page=50,  # 每页50条，提高效率
+                    per_page=DEFAULT_PAGE_SIZE,  # 使用常量
                     sort_key=sort_key,
-                    max_pages=20  # 最多20页，防止数据过多
+                    max_pages=MAX_PAGES_LIMIT  # 使用常量
                 )
             
             if not bugs:
@@ -245,7 +242,7 @@ class ZenTaoMCPServer:
             
             # 格式化输出
             result = f"缺陷清单（共 {len(bugs)} 个）\n"
-            result += "=" * 60 + "\n"
+            result += SECTION_SEPARATOR + "\n"
             
             for i, bug in enumerate(bugs, 1):
                 # 使用模型的显示方法
@@ -256,7 +253,7 @@ class ZenTaoMCPServer:
                 result += f"👤 指派给: {bug.assignedTo or '未指派'}\n"
                 result += f"👨‍💻 解决: {bug.resolvedBy or ''}\n"
                 result += f"🔧 方案: {bug.get_resolution_display()}\n"
-                result += f" {'─' * 50}\n"
+                result += f" {ITEM_SEPARATOR}\n"
             
             return result
             
@@ -293,16 +290,15 @@ class ZenTaoMCPServer:
             
             # 构建详细信息，参考 BugDetailData.display_summary 的结构
             result = f"缺陷详细信息 - #{bug.id}\n"
-            result += "=" * 60 + "\n"
+            result += SECTION_SEPARATOR + "\n"
             result += f"📋 标题: {bug.title}\n\n"
             
             # ===============================
             # 基本信息部分
             # ===============================
             result += "## 📊 基本信息\n"
-            result += "-" * 40 + "\n"
+            result += SUBSECTION_SEPARATOR + "\n"
             
-            # 状态和严重程度映射
             # 使用模型的显示方法，避免重复维护映射
             status_text = bug.get_status_display_with_emoji()
             severity_text = bug.get_severity_display_with_emoji()
@@ -316,7 +312,7 @@ class ZenTaoMCPServer:
             # 获取模块路径
             module_path = " > ".join([m.get("name", "") for m in bug_detail_data.modulePath if m.get("name")]) if bug_detail_data.modulePath else "未指定"
             
-            # 用户名映射
+            # 用户名映射 - 统一的用户名获取逻辑
             def get_user_name(username: str) -> str:
                 if not username:
                     return "未指定"
@@ -347,7 +343,7 @@ class ZenTaoMCPServer:
             # 重现步骤部分
             # ===============================
             result += "## 🔄 重现步骤\n"
-            result += "-" * 40 + "\n"
+            result += SUBSECTION_SEPARATOR + "\n"
             
             if bug.steps:
                 import re
@@ -381,7 +377,7 @@ class ZenTaoMCPServer:
             # ===============================
             if bug.files:
                 result += "## 📎 附件信息\n"
-                result += "-" * 40 + "\n"
+                result += SUBSECTION_SEPARATOR + "\n"
                 
                 zentao_base_url = client.base_url
                 session_id = client.session_id or ""
@@ -407,7 +403,7 @@ class ZenTaoMCPServer:
             # ===============================
             if bug_detail_data.actions:
                 result += "## 📋 历史记录\n"
-                result += "-" * 40 + "\n"
+                result += SUBSECTION_SEPARATOR + "\n"
                 
                 # 按日期排序操作历史
                 sorted_actions = sorted(
@@ -416,27 +412,16 @@ class ZenTaoMCPServer:
                     reverse=True
                 )
                 
-                # 只显示最近的几条记录，避免过长
-                recent_actions = sorted_actions[:10]
+                # 只显示最近的几条记录，避免过长 - 使用常量
+                recent_actions = sorted_actions[:MAX_HISTORY_RECORDS]
                 
                 for action_id, action in recent_actions:
                     date = action.date or '未知时间'
                     actor = get_user_name(action.actor)
-                    action_type = action.action.value
                     comment = action.comment
                     
-                    # 操作类型图标
-                    action_icon = {
-                        'opened': '📌',
-                        'edited': '✏️', 
-                        'assigned': '👤',
-                        'resolved': '✅',
-                        'activated': '🔄',
-                        'closed': '🔒',
-                        'commented': '💬'
-                    }.get(action_type, '📝')
-                    
-                    # 使用枚举的中文显示
+                    # 使用枚举的显示方法获取图标和中文显示
+                    action_icon = action.action.emoji
                     action_display = str(action.action)
                     
                     result += f"{action_icon} {date} - {actor} {action_display}\n"
@@ -444,17 +429,15 @@ class ZenTaoMCPServer:
                     # 显示历史变更
                     if action.history:
                         for change in action.history:
-                            field = change.field
-                            old_val = change.old
-                            new_val = change.new
-                            
-                            # 转换用户名为真实姓名
-                            if field == "assignedTo":
-                                old_val = get_user_name(old_val)
-                                new_val = get_user_name(new_val)
-                            
-                            result += f"   🔄 {field}: {old_val} → {new_val}\n"
-                    
+                            if change.field == "resolution":
+                                result += f"   🔄 解决方案: {str(BugResolution(change.new))}\n"
+                            if change.field == "resolvedDate":
+                                result += f"   🔄 解决时间: {change.new}\n"
+                            if change.field == "resolvedBy":
+                                result += f"   🔄 解决人: {get_user_name(change.new)}\n"
+                            if change.field == "assignedTo":
+                                result += f"   🔄 任务指派: {get_user_name(change.old)} → {get_user_name(change.new)}\n"
+                        result += "\n"
                     if comment:
                         # 清理评论中的HTML
                         clean_comment = re.sub(r'<[^>]+>', '', comment).strip()
@@ -462,8 +445,8 @@ class ZenTaoMCPServer:
                             result += f"   💭 {clean_comment}\n"
                     result += "\n"
                 
-                if len(sorted_actions) > 10:
-                    result += f"... 还有 {len(sorted_actions) - 10} 条历史记录\n\n"
+                if len(sorted_actions) > MAX_HISTORY_RECORDS:
+                    result += f"... 还有 {len(sorted_actions) - MAX_HISTORY_RECORDS} 条历史记录\n\n"
             
             return result
             
@@ -499,20 +482,21 @@ class ZenTaoMCPServer:
             if not bugs:
                 return f"📭 没有状态为'{status}'的缺陷"
             
-            # 使用枚举的emoji属性获取表情符号
+            # 使用枚举的显示方法获取表情符号
             try:
                 status_enum = BugStatus(status)
                 status_emoji = status_enum.emoji
+                status_display = str(status_enum)
             except ValueError:
                 status_emoji = "📝"
+                status_display = status
             
-            result = f"{status_emoji} {status.upper()} 状态缺陷（共 {len(bugs)} 个）\n"
-            result += "─" * 40 + "\n"
+            result = f"{status_emoji} {status_display} 缺陷（共 {len(bugs)} 个）\n"
+            result += SUBSECTION_SEPARATOR + "\n"
             
             for bug in bugs:
                 # 使用模型方法获取严重程度表情符号
-                severity_display = bug.get_severity_display_with_emoji()
-                severity_emoji = severity_display.split(bug.get_severity_display())[0]  # 提取表情符号部分
+                severity_emoji = bug.severity.emoji
                 result += f"{severity_emoji} [{bug.id}] {bug.title}\n"
             
             return result
@@ -560,13 +544,8 @@ class ZenTaoMCPServer:
             # 根据状态参数确定查询参数
             status_param = None if status == "all" else status
             
-            # 确定排序键  
-            sort_key_map = {
-                "latest": "id_desc",
-                "oldest": "id_asc",
-                "deadline": "deadline_asc"
-            }
-            sort_key = sort_key_map.get(sort_order, "id_desc")
+            # 使用常量配置的排序映射
+            sort_key = TASK_SORT_KEY_MAPPING.get(sort_order, "id_desc")
             
             # 获取任务列表
             if limit > 0:
@@ -574,7 +553,7 @@ class ZenTaoMCPServer:
                 tasks = client.tasks.get_my_tasks(
                     status=status_param,
                     page=1,
-                    per_page=min(limit, 100),  # 最多一次获取100条
+                    per_page=min(limit, MAX_SINGLE_PAGE_SIZE),  # 使用常量
                     sort_key=sort_key
                 )
                 tasks = tasks[:limit]  # 截取指定数量
@@ -582,9 +561,9 @@ class ZenTaoMCPServer:
                 # 获取所有页面数据
                 tasks = client.tasks.get_my_tasks_all_pages(
                     status=status_param,
-                    per_page=50,  # 每页50条，提高效率
+                    per_page=DEFAULT_PAGE_SIZE,  # 使用常量
                     sort_key=sort_key,
-                    max_pages=20  # 最多20页，防止数据过多
+                    max_pages=MAX_PAGES_LIMIT  # 使用常量
                 )
             
             if not tasks:
@@ -593,24 +572,15 @@ class ZenTaoMCPServer:
             
             # 格式化输出
             result = f"任务清单（共 {len(tasks)} 个）\n"
-            result += "=" * 60 + "\n"
+            result += SECTION_SEPARATOR + "\n"
             
             for i, task in enumerate(tasks, 1):
-                # 状态映射
-                status_text = {
-                    "wait": "⏸️等待",
-                    "doing": "🔄进行中",
-                    "done": "✅已完成",
-                    "closed": "🔒已关闭",
-                    "pause": "⏯️暂停",
-                    "cancel": "❌已取消"
-                }.get(task.status, f"📝{task.status}")
-                
-                # 优先级映射
-                pri_text = task.priority.emoji + task.priority.value
+                # 使用模型的显示方法，避免硬编码映射
+                status_text = task.get_status_display_with_emoji()
+                pri_text = task.get_priority_display_with_emoji()
                 
                 result += f"{i:3d}. [{task.id:>6}] {task.name}\n"
-                result += f"     状态: {status_text:<10} | 优先级: {pri_text:<8}\n"
+                result += f"     状态: {status_text:<15} | 优先级: {pri_text:<15}\n"
                 result += f"     项目: {task.project or '未指定':<20} | 指派给: {task.assignedTo or '未指派'}\n"
                 
                 # 工时信息
@@ -621,7 +591,7 @@ class ZenTaoMCPServer:
                 if task.deadline:
                     result += f" | 截止: {task.deadline}"
                 result += "\n"
-                result += f"     {'─' * 50}\n"
+                result += f"     {ITEM_SEPARATOR}\n"
             
             return result
             
@@ -651,20 +621,12 @@ class ZenTaoMCPServer:
             if not task:
                 return f"❌ 未找到ID为 {task_id} 的任务"
             
-            # 状态和优先级映射
-            status_text = {
-                "wait": "⏸️等待",
-                "doing": "🔄进行中",
-                "done": "✅已完成",
-                "closed": "🔒已关闭",
-                "pause": "⏯️暂停",
-                "cancel": "❌已取消"
-            }.get(task.status, f"📝{task.status}")
-            
-            pri_text = task.priority.display_text
+            # 使用模型的显示方法，避免硬编码映射
+            status_text = task.get_status_display_with_emoji()
+            pri_text = task.get_priority_display_with_emoji()
             
             result = f"任务详细信息 - #{task.id}\n"
-            result += "=" * 60 + "\n"
+            result += SECTION_SEPARATOR + "\n"
             result += f"📋 任务名称: {task.name}\n"
             result += f"📊 状态: {status_text}\n"
             result += f"🎯 优先级: {pri_text}\n"
@@ -698,7 +660,7 @@ class ZenTaoMCPServer:
                 pass
                 
             result += "\n📝 详细描述:\n"
-            result += "-" * 30 + "\n"
+            result += SUBSECTION_SEPARATOR + "\n"
             result += f"{task.desc or '无详细描述'}\n"
             
             return result
@@ -735,17 +697,20 @@ class ZenTaoMCPServer:
             if not tasks:
                 return f"📭 没有状态为'{status}'的任务"
             
-            # 使用枚举的emoji属性获取表情符号
+            # 使用枚举的显示方法获取表情符号
             try:
                 status_enum = TaskStatus(status)
                 status_emoji = status_enum.emoji
+                status_display = str(status_enum)
             except ValueError:
                 status_emoji = "📝"
+                status_display = status
             
-            result = f"{status_emoji} {status.upper()} 状态任务（共 {len(tasks)} 个）\n"
-            result += "─" * 40 + "\n"
+            result = f"{status_emoji} {status_display} 任务（共 {len(tasks)} 个）\n"
+            result += SUBSECTION_SEPARATOR + "\n"
             
             for task in tasks:
+                # 使用模型方法获取优先级emoji
                 pri_emoji = task.get_priority_emoji()
                 result += f"{pri_emoji} [{task.id}] {task.name}\n"
             
@@ -786,22 +751,17 @@ class ZenTaoMCPServer:
                 return "📭 您当前没有参与任何项目"
             
             result = f"我参与的项目（共 {len(projects)} 个）\n"
-            result += "=" * 50 + "\n"
+            result += SECTION_SEPARATOR + "\n"
             
             for i, project in enumerate(projects, 1):
-                # 状态映射
-                status_text = {
-                    "wait": "⏸️等待开始",
-                    "doing": "🔄进行中",
-                    "suspended": "⏯️已暂停", 
-                    "closed": "✅已关闭"
-                }.get(project.status, f"📝{project.status}")
+                # 使用模型的显示方法，避免硬编码映射
+                status_text = project.get_status_display_with_emoji()
                 
                 result += f"{i:2d}. [{project.id:>4}] {project.name}\n"
                 result += f"    状态: {status_text}\n"
                 if project.begin and project.end:
                     result += f"    时间: {project.begin} ~ {project.end}\n"
-                result += f"    {'─' * 40}\n"
+                result += f"    {SUBSECTION_SEPARATOR}\n"
             
             return result
             
@@ -831,19 +791,14 @@ class ZenTaoMCPServer:
             if not project:
                 return f"❌ 未找到ID为 {project_id} 的项目"
             
-            # 状态映射
-            status_text = {
-                "wait": "⏸️等待开始",
-                "doing": "🔄进行中",
-                "suspended": "⏯️已暂停",
-                "closed": "✅已关闭"
-            }.get(project.status, f"📝{project.status}")
+            # 使用模型的显示方法，避免硬编码映射
+            status_text = project.get_status_display_with_emoji()
             
             result = f"项目详细信息 - #{project.id}\n"
-            result += "=" * 50 + "\n"
+            result += SECTION_SEPARATOR + "\n"
             result += f"📋 项目名称: {project.name}\n"
             result += f"📊 状态: {status_text}\n"
-            result += f"👨‍💼 项目经理: {project.pm or '未指定'}\n"
+            result += f"👨‍💼 项目经理: {project.PM or '未指定'}\n"
             
             if project.begin and project.end:
                 result += f"📅 项目周期: {project.begin} ~ {project.end}\n"
@@ -854,7 +809,7 @@ class ZenTaoMCPServer:
                 result += f"👥 团队成员: {project.team}\n"
                 
             result += "\n📝 项目描述:\n"
-            result += "-" * 30 + "\n"
+            result += SUBSECTION_SEPARATOR + "\n"
             result += f"{project.desc or '无项目描述'}\n"
             
             return result
