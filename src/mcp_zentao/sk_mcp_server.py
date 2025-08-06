@@ -412,7 +412,7 @@ class ZenTaoMCPServer:
                 # 按日期排序操作历史
                 sorted_actions = sorted(
                     bug_detail_data.actions.items(), 
-                    key=lambda x: x[1].get('date', ''), 
+                    key=lambda x: x[1].date, 
                     reverse=True
                 )
                 
@@ -420,10 +420,10 @@ class ZenTaoMCPServer:
                 recent_actions = sorted_actions[:10]
                 
                 for action_id, action in recent_actions:
-                    date = action.get('date', '未知时间')
-                    actor = get_user_name(action.get('actor', ''))
-                    action_type = action.get('action', '未知操作')
-                    comment = action.get('comment', '')
+                    date = action.date or '未知时间'
+                    actor = get_user_name(action.actor)
+                    action_type = action.action.value
+                    comment = action.comment
                     
                     # 操作类型图标
                     action_icon = {
@@ -436,7 +436,25 @@ class ZenTaoMCPServer:
                         'commented': '💬'
                     }.get(action_type, '📝')
                     
-                    result += f"{action_icon} {date} - {actor} {action_type}\n"
+                    # 使用枚举的中文显示
+                    action_display = str(action.action)
+                    
+                    result += f"{action_icon} {date} - {actor} {action_display}\n"
+                    
+                    # 显示历史变更
+                    if action.history:
+                        for change in action.history:
+                            field = change.field
+                            old_val = change.old
+                            new_val = change.new
+                            
+                            # 转换用户名为真实姓名
+                            if field == "assignedTo":
+                                old_val = get_user_name(old_val)
+                                new_val = get_user_name(new_val)
+                            
+                            result += f"   🔄 {field}: {old_val} → {new_val}\n"
+                    
                     if comment:
                         # 清理评论中的HTML
                         clean_comment = re.sub(r'<[^>]+>', '', comment).strip()

@@ -217,6 +217,73 @@ class BugResolution(str, Enum):
         return self.__str__()
 
 
+class BugActionType(str, Enum):
+    """缺陷操作类型枚举"""
+    OPENED = "opened"            # 创建
+    COMMENTED = "commented"      # 添加备注
+    ASSIGNED = "assigned"        # 指派给
+    RESOLVED = "resolved"        # 解决
+    CLOSED = "closed"            # 关闭
+    ACTIVATED = "activated"      # 激活
+    EDITED = "edited"            # 编辑
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            "opened": "创建",
+            "commented": "添加备注",
+            "assigned": "指派给",
+            "resolved": "解决",
+            "closed": "关闭",
+            "activated": "激活",
+            "edited": "编辑"
+        }.get(self.value, self.value)
+
+
+class ActionHistoryItem(BaseModel):
+    """操作历史变更条目"""
+    id: str = Field(description="历史记录ID")
+    action: str = Field(description="关联的操作ID")
+    field: str = Field(description="变更字段名")
+    old: str = Field(description="旧值")
+    new: str = Field(description="新值")  
+    diff: str = Field(default="", description="差异信息")
+    
+    def __str__(self) -> str:
+        """友好的字符串表示"""
+        return f"{self.field}: {self.old} → {self.new}"
+    
+    def __repr__(self) -> str:
+        """简洁的字符串表示"""
+        return f"ActionHistoryItem(field='{self.field}', old='{self.old}', new='{self.new}')"
+
+
+class BugAction(BaseModel):
+    """缺陷操作记录"""
+    id: str = Field(description="操作ID")
+    objectType: str = Field(description="对象类型")
+    objectID: str = Field(description="对象ID") 
+    product: str = Field(description="产品ID")
+    project: str = Field(description="项目ID")
+    actor: str = Field(description="操作者用户名")
+    action: BugActionType = Field(description="操作类型")
+    date: str = Field(description="操作时间")
+    comment: str = Field(default="", description="备注内容")
+    extra: str = Field(default="", description="额外信息")
+    read: bool = Field(description="是否已读")
+    efforted: bool = Field(description="是否计入工时")
+    history: List[ActionHistoryItem] = Field(default_factory=list, description="历史变更记录")
+    appendLink: Optional[str] = Field(default="", description="附加链接")
+    
+    @field_validator("read", "efforted", mode="before")
+    @classmethod
+    def validate_boolean_from_string(cls, v):
+        """将字符串'0'/'1'转换为布尔值"""
+        if isinstance(v, str):
+            return v == "1"
+        return bool(v)
+
+
 class BugModel(BaseModel):
     """缺陷信息模型"""
     # 基本标识
@@ -568,7 +635,7 @@ class BugDetailData(BaseModel):
     bug: BugModel = Field(description="缺陷详细信息")
     branchName: str = Field(description="分支名称")
     users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
-    actions: Dict[str, Dict[str, Any]] = Field(description="操作历史")
+    actions: Dict[str, BugAction] = Field(description="操作历史")
     builds: Dict[str, str] = Field(description="版本构建列表")
     preAndNext: Dict[str, Any] = Field(description="前一个和后一个缺陷")
     pager: Optional[Any] = Field(default=None, description="分页信息")
@@ -703,35 +770,26 @@ class BugDetailData(BaseModel):
             # 按日期排序操作历史
             sorted_actions = sorted(
                 self.actions.items(), 
-                key=lambda x: x[1].get("date", "")
+                key=lambda x: x[1].date
             )
             
             for action_id, action in sorted_actions:
-                date = action.get("date", "")
-                actor = get_user_name(action.get("actor", ""))
-                action_type = action.get("action", "")
-                comment = action.get("comment", "")
+                date = action.date
+                actor = get_user_name(action.actor)
+                action_type = str(action.action)  # 使用枚举的字符串表示
+                comment = action.comment
                 
-                # 根据动作类型生成中文描述
-                action_desc = {
-                    "opened": "创建",
-                    "commented": "添加备注",
-                    "assigned": "指派给",
-                    "resolved": "解决",
-                    "closed": "关闭",
-                    "activated": "激活",
-                    "edited": "编辑",
-                }.get(action_type, action_type)
+                # 使用枚举的中文描述
+                action_desc = str(action.action)
                 
                 lines.append(f"**{date}** - **{actor}** {action_desc}")
                 
                 # 处理历史变更
-                history = action.get("history", [])
-                if history:
-                    for change in history:
-                        field = change.get("field", "")
-                        old_val = change.get("old", "")
-                        new_val = change.get("new", "")
+                if action.history:
+                    for change in action.history:
+                        field = change.field
+                        old_val = change.old
+                        new_val = change.new
                         
                         # 转换用户名为真实姓名
                         if field == "assignedTo":

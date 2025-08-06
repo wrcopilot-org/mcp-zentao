@@ -8,3 +8,6 @@ wheels/
 
 # Virtual environments
 .venv
+
+# 测试输出
+test_outputs/
