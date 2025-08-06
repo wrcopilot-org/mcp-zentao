@@ -75,12 +75,10 @@ class ZenTaoMCPServer:
         # 缺陷管理函数
         self.kernel.add_function("zentao_bugs", self.query_bug_list)
         self.kernel.add_function("zentao_bugs", self.query_bug_detail)
-        # self.kernel.add_function("zentao_bugs", self.query_bugs_by_status)
         
         # 任务管理函数
         self.kernel.add_function("zentao_tasks", self.query_task_list)
         self.kernel.add_function("zentao_tasks", self.query_task_detail)
-        # self.kernel.add_function("zentao_tasks", self.query_tasks_by_status)
 
         # 项目管理函数
         self.kernel.add_function("zentao_projects", self.query_project_list)
@@ -454,57 +452,6 @@ class ZenTaoMCPServer:
             logger.error(f"查询缺陷详情失败: {e}")
             return f"查询缺陷详情失败：{str(e)}"
     
-    @kernel_function(
-        description="按指定状态查询缺陷列表，专门用于状态筛选",
-        name="query_bugs_by_status"
-    )
-    def query_bugs_by_status(self, status: str, limit: int = 10) -> str:
-        """按指定状态查询缺陷列表
-        
-        Args:
-            status: 缺陷状态（active/resolved/closed）
-            limit: 返回数量限制，默认10条
-            
-        Returns:
-            缺陷列表的简化格式
-        """
-        try:
-            self._ensure_logged_in()
-            client = self._ensure_client()
-            
-            bugs = client.bugs.get_my_bugs(
-                status=status,
-                page=1,
-                per_page=limit,
-                sort_key="id_desc"
-            )
-            
-            if not bugs:
-                return f"📭 没有状态为'{status}'的缺陷"
-            
-            # 使用枚举的显示方法获取表情符号
-            try:
-                status_enum = BugStatus(status)
-                status_emoji = status_enum.emoji
-                status_display = str(status_enum)
-            except ValueError:
-                status_emoji = "📝"
-                status_display = status
-            
-            result = f"{status_emoji} {status_display} 缺陷（共 {len(bugs)} 个）\n"
-            result += SUBSECTION_SEPARATOR + "\n"
-            
-            for bug in bugs:
-                # 使用模型方法获取严重程度表情符号
-                severity_emoji = bug.severity.emoji
-                result += f"{severity_emoji} [{bug.id}] {bug.title}\n"
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"按状态查询缺陷失败: {e}")
-            return f"按状态查询缺陷失败：{str(e)}"
-    
     # ===============================
     # 任务管理函数
     # ===============================
@@ -668,57 +615,6 @@ class ZenTaoMCPServer:
         except Exception as e:
             logger.error(f"查询任务详情失败: {e}")
             return f"查询任务详情失败：{str(e)}"
-    
-    @kernel_function(
-        description="按指定状态查询任务列表，专门用于状态筛选",
-        name="query_tasks_by_status"
-    )
-    def query_tasks_by_status(self, status: str, limit: int = 10) -> str:
-        """按指定状态查询任务列表
-        
-        Args:
-            status: 任务状态（wait/doing/done/closed）
-            limit: 返回数量限制，默认10条
-            
-        Returns:
-            任务列表的简化格式
-        """
-        try:
-            self._ensure_logged_in()
-            client = self._ensure_client()
-            
-            tasks = client.tasks.get_my_tasks(
-                status=status,
-                page=1,
-                per_page=limit,
-                sort_key="id_desc"
-            )
-            
-            if not tasks:
-                return f"📭 没有状态为'{status}'的任务"
-            
-            # 使用枚举的显示方法获取表情符号
-            try:
-                status_enum = TaskStatus(status)
-                status_emoji = status_enum.emoji
-                status_display = str(status_enum)
-            except ValueError:
-                status_emoji = "📝"
-                status_display = status
-            
-            result = f"{status_emoji} {status_display} 任务（共 {len(tasks)} 个）\n"
-            result += SUBSECTION_SEPARATOR + "\n"
-            
-            for task in tasks:
-                # 使用模型方法获取优先级emoji
-                pri_emoji = task.get_priority_emoji()
-                result += f"{pri_emoji} [{task.id}] {task.name}\n"
-            
-            return result
-            
-        except Exception as e:
-            logger.error(f"按状态查询任务失败: {e}")
-            return f"按状态查询任务失败：{str(e)}"
     
     # ===============================
     # 项目管理函数
@@ -904,10 +800,6 @@ def run(
         from starlette.applications import Starlette
         from starlette.routing import Mount, Route
         from starlette.responses import JSONResponse
-        
-        # 创建 SSE 传输
-        sse = SseServerTransport("/messages")
-        
         # 创建 Starlette 应用
         async def get_info(request):
             return JSONResponse({
@@ -915,15 +807,22 @@ def run(
                 "version": "1.0.0",
                 "description": "禅道系统 MCP 服务器，提供缺陷管理、任务跟踪和项目管理功能"
             })
+
+        sse = SseServerTransport("/messages/")
+
+        async def handle_sse(request):
+            async with sse.connect_sse(request.scope, request.receive, request._send) as (read_stream, write_stream):
+                await mcp_server.run(read_stream, write_stream, mcp_server.create_initialization_options())
         
         starlette_app = Starlette(
+            debug=True,
             routes=[
                 Route("/", get_info),
-                Mount("/sse", sse.create_app(mcp_server))
-            ]
+                Route("/sse", endpoint=handle_sse),
+                Mount("/messages/", app=sse.handle_post_message),
+            ],
         )
-        
-        logger.info(f"启动 SSE 服务器，监听端口: {port}")
+
         uvicorn.run(starlette_app, host="0.0.0.0", port=port)  # nosec
         
     elif transport == "stdio":
