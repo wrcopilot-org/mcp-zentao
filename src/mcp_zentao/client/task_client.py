@@ -99,8 +99,8 @@ class TaskClient(BaseClient):
         
         return all_tasks
     
-    def get_task_by_id(self, task_id: str) -> Dict[str, Any]:
-        """根据任务ID获取任务详细信息
+    def get_task_by_id(self, task_id: int) -> Dict[str, Any]:
+        """根据任务ID获取任务的详细信息
         
         Args:
             task_id: 任务ID
@@ -113,17 +113,17 @@ class TaskClient(BaseClient):
         """
         return self.get_task_detail(task_id).get_task()
     
-    def get_task_detail(self, task_id: str) -> TaskDetailResponse:
-        """获取任务完整详情响应（包含项目信息、用户映射等附加信息）
+    def get_task_detail(self, task_id: int) -> TaskDetailResponse:
+        """获取指定任务的完整详细信息
         
         Args:
             task_id: 任务ID
             
         Returns:
-            任务详情响应对象，包含附加信息
+            任务详细信息
             
         Raises:
-            ZenTaoError: 获取任务详情失败
+            ZenTaoError: 获取任务详细失败
         """
         if not self.session_id:
             raise ValueError("需要先登录才能获取任务详情")
@@ -131,7 +131,7 @@ class TaskClient(BaseClient):
         response = self.get(
             endpoint='task-view-{task_id}.json',
             response_model=TaskDetailResponse,
-            task_id=task_id
+            task_id=str(task_id)
         )
         
         return response
@@ -165,9 +165,9 @@ class TaskClient(BaseClient):
         
         # 如果创建成功，获取新创建的任务信息
         if hasattr(response, 'data') and response.data:
-            task_id = str(response.data.get('id', ''))
+            task_id = response.data.get('id', 0)
             if task_id:
-                return self.get_task_by_id(task_id)
+                return self.get_task_by_id(int(task_id))
         
         # 如果无法获取新任务ID，返回基础任务信息
         return TaskModel(
@@ -180,7 +180,7 @@ class TaskClient(BaseClient):
                if k in TaskModel.model_fields and v is not None}
         )
     
-    def start_task(self, task_id: str) -> bool:
+    def start_task(self, task_id: int) -> bool:
         """开始任务
         
         Args:
@@ -202,14 +202,14 @@ class TaskClient(BaseClient):
             self.post(
                 endpoint='task-start-{task_id}-{sessionid}.json',
                 response_model=CommonOperationResponse,
-                task_id=task_id,
+                task_id=str(task_id),
                 sessionid=self.session_id
             )
             return True
         except Exception:
             return False
     
-    def finish_task(self, task_id: str, finish_data: TaskFinishRequest) -> bool:
+    def finish_task(self, task_id: int, finish_data: TaskFinishRequest) -> bool:
         """完成任务
         
         Args:
@@ -233,14 +233,14 @@ class TaskClient(BaseClient):
                 endpoint='task-finish-{task_id}-{sessionid}.json',
                 response_model=CommonOperationResponse,
                 data=finish_data.model_dump(exclude_none=True),
-                task_id=task_id,
+                task_id=str(task_id),
                 sessionid=self.session_id
             )
             return True
         except Exception:
             return False
     
-    def close_task(self, task_id: str, comment: Optional[str] = None) -> bool:
+    def close_task(self, task_id: int, comment: Optional[str] = None) -> bool:
         """关闭任务
         
         Args:
@@ -268,7 +268,7 @@ class TaskClient(BaseClient):
                 endpoint='task-close-{task_id}-{sessionid}.json',
                 response_model=CommonOperationResponse,
                 data=data if data else None,
-                task_id=task_id,
+                task_id=str(task_id),
                 sessionid=self.session_id
             )
             return True

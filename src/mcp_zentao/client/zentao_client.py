@@ -239,15 +239,11 @@ class ZenTaoClient:
         """获取我的缺陷列表（便捷方法）"""
         return self.bugs.get_my_bugs(status)
     
-    def get_project_by_id(self, project_id: str):
-        """根据ID获取项目信息（便捷方法）"""
-        return self.projects.get_project_by_id(project_id)
-    
-    def get_task_by_id(self, task_id: str):
+    def get_task_by_id(self, task_id: int):
         """根据ID获取任务信息（便捷方法）"""
         return self.tasks.get_task_by_id(task_id)
     
-    def get_bug_by_id(self, bug_id: str):
+    def get_bug_by_id(self, bug_id: int):
         """根据ID获取缺陷信息（便捷方法）"""
         return self.bugs.get_bug_by_id(bug_id)
     

@@ -99,7 +99,7 @@ class BugClient(BaseClient):
         
         return all_bugs
     
-    def get_bug_by_id(self, bug_id: str) -> BugModel:
+    def get_bug_by_id(self, bug_id: int) -> BugModel:
         """根据缺陷ID获取缺陷详细信息
         
         Args:
@@ -113,14 +113,14 @@ class BugClient(BaseClient):
         """
         return self.get_bug_detail(bug_id).get_bug()
     
-    def get_bug_detail(self, bug_id: str) -> BugDetailResponse:
-        """获取缺陷完整详情响应（包含用户映射、产品映射等附加信息）
+    def get_bug_detail(self, bug_id: int) -> BugDetailResponse:
+        """获取指定缺陷完整详情信息
         
         Args:
             bug_id: 缺陷ID
             
         Returns:
-            缺陷详情响应对象，包含附加信息
+            缺陷详细信息
             
         Raises:
             ZenTaoError: 获取缺陷详情失败
@@ -131,7 +131,7 @@ class BugClient(BaseClient):
         response = self.get(
             endpoint='bug-view-{bug_id}.json',
             response_model=BugDetailResponse,
-            bug_id=bug_id
+            bug_id=str(bug_id)
         )
         
         return response
@@ -182,7 +182,7 @@ class BugClient(BaseClient):
                if k in BugModel.model_fields and v is not None}
         )
     
-    def resolve_bug(self, bug_id: str, resolve_data: BugResolveRequest) -> bool:
+    def resolve_bug(self, bug_id: int, resolve_data: BugResolveRequest) -> bool:
         """解决缺陷
         
         Args:
@@ -206,14 +206,14 @@ class BugClient(BaseClient):
                 endpoint='bug-resolve-{bug_id}-{sessionid}.json',
                 response_model=CommonOperationResponse,
                 data=resolve_data.model_dump(exclude_none=True),
-                bug_id=bug_id,
+                bug_id=str(bug_id),
                 sessionid=self.session_id
             )
             return True
         except Exception:
             return False
     
-    def confirm_bug(self, bug_id: str, confirm_data: BugConfirmRequest) -> bool:
+    def confirm_bug(self, bug_id: int, confirm_data: BugConfirmRequest) -> bool:
         """确认缺陷
         
         Args:
@@ -237,14 +237,14 @@ class BugClient(BaseClient):
                 endpoint='bug-confirmBug-{bug_id}-{sessionid}.json',
                 response_model=CommonOperationResponse,
                 data=confirm_data.model_dump(exclude_none=True),
-                bug_id=bug_id,
+                bug_id=str(bug_id),
                 sessionid=self.session_id
             )
             return True
         except Exception:
             return False
     
-    def close_bug(self, bug_id: str, comment: Optional[str] = None) -> bool:
+    def close_bug(self, bug_id: int, comment: Optional[str] = None) -> bool:
         """关闭缺陷
         
         Args:
@@ -272,7 +272,7 @@ class BugClient(BaseClient):
                 endpoint='bug-close-{bug_id}-{sessionid}.json',
                 response_model=CommonOperationResponse,
                 data=data if data else None,
-                bug_id=bug_id,
+                bug_id=str(bug_id),
                 sessionid=self.session_id
             )
             return True

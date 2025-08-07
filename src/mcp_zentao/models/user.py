@@ -9,6 +9,10 @@
 """
 
 from pydantic import BaseModel, Field
+from typing import Optional, List, Dict, Any, Union
+from enum import Enum
+
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any, Union
 from enum import Enum
 from datetime import datetime
@@ -280,10 +284,42 @@ class UserModel(BaseModel):
     company: str = Field(description="公司名称")
 
 
+class UserListData(BaseModel):
+    """用户列表数据结构"""
+    title: str = Field(description="页面标题")
+    users: List[Dict[str, Any]] = Field(description="用户列表数组")
+    searchForm: str = Field(description="搜索表单数据")
+    deptTree: str = Field(description="部门树HTML")
+    parentDepts: List[Any] = Field(description="父级部门")
+    dept: Union[Dict[str, Any], bool] = Field(description="当前部门信息")
+    orderBy: str = Field(description="排序方式")
+    deptID: int = Field(description="部门ID")
+    pager: Dict[str, Any] = Field(description="分页信息")
+    param: str = Field(description="参数")
+    type: str = Field(description="类型")
+
+
 class UserListResponse(BaseModel):
     """用户列表响应"""
     status: str = Field(description="响应状态")
-    users: List[UserModel] = Field(description="用户列表")
+    data: str = Field(description="JSON字符串格式的用户数据")
+    md5: Optional[str] = Field(default=None, description="数据MD5校验")
+    
+    def get_user_list_data(self) -> UserListData:
+        """解析data字段并返回UserListData对象"""
+        import json
+        parsed_data = json.loads(self.data)
+        return UserListData.model_validate(parsed_data)
+    
+    def get_users(self) -> List[Dict[str, Any]]:
+        """获取用户列表"""
+        user_data = self.get_user_list_data()
+        return user_data.users
+    
+    def get_dept_info(self) -> Union[Dict[str, Any], bool]:
+        """获取部门信息"""
+        user_data = self.get_user_list_data()
+        return user_data.dept
 
 
 # 用于获取特定用户信息的响应

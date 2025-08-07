@@ -372,6 +372,56 @@ class ProjectCreateRequest(BaseModel):
     acl: ProjectACL = Field(default=ProjectACL.OPEN, description="访问控制")
 
 
+class ProjectBugData(BaseModel):
+    """项目缺陷数据结构"""
+    project: Dict[str, Any] = Field(description="项目信息")
+    bugs: List[Dict[str, Any]] = Field(description="缺陷列表 - 注意是数组而非字典")
+    teamMembers: Dict[str, Dict[str, Any]] = Field(description="团队成员信息")
+    title: str = Field(description="页面标题")
+    projects: Dict[str, str] = Field(description="所有项目列表，项目ID到名称的映射")
+    childProjects: List[Any] = Field(description="子项目列表")
+    products: List[Any] = Field(description="产品列表")
+    tabID: str = Field(description="标签ID")
+    build: bool = Field(description="构建状态")
+    buildID: int = Field(description="构建ID")
+    pager: Dict[str, Any] = Field(description="分页信息")
+    orderBy: str = Field(description="排序方式")
+    users: Dict[str, str] = Field(description="用户ID到用户名的映射")
+    productID: Optional[int] = Field(description="产品ID")
+    branchID: int = Field(description="分支ID")
+    memberPairs: Dict[str, str] = Field(description="成员对，用户名到真实姓名的映射")
+    type: str = Field(description="类型")
+    param: int = Field(description="参数")
+
+
+class ProjectBugResponse(BaseModel):
+    """项目缺陷响应"""
+    status: str = Field(description="响应状态")
+    data: str = Field(description="JSON字符串格式的缺陷数据")
+    md5: Optional[str] = Field(default=None, description="数据MD5校验")
+    
+    def get_project_bug_data(self) -> ProjectBugData:
+        """解析data字段并返回ProjectBugData对象"""
+        import json
+        parsed_data = json.loads(self.data)
+        return ProjectBugData.model_validate(parsed_data)
+    
+    def get_project_info(self) -> Dict[str, Any]:
+        """获取项目信息"""
+        bug_data = self.get_project_bug_data()
+        return bug_data.project
+    
+    def get_bugs(self) -> List[Dict[str, Any]]:
+        """获取缺陷列表 - 返回数组"""
+        bug_data = self.get_project_bug_data()
+        return bug_data.bugs
+    
+    def get_team_members(self) -> Dict[str, Dict[str, Any]]:
+        """获取团队成员信息"""
+        bug_data = self.get_project_bug_data()
+        return bug_data.teamMembers
+
+
 class ProjectEditRequest(BaseModel):
     """编辑项目请求"""
     name: Optional[str] = Field(default=None, description="项目名称")

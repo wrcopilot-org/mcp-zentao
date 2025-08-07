@@ -80,9 +80,9 @@ class ZenTaoMCPServer:
         self.kernel.add_function("zentao_tasks", self.query_task_list)
         self.kernel.add_function("zentao_tasks", self.query_task_detail)
 
-        # 项目管理函数
-        self.kernel.add_function("zentao_projects", self.query_project_list)
-        self.kernel.add_function("zentao_projects", self.query_project_detail)
+        # # 项目管理函数
+        # self.kernel.add_function("zentao_projects", self.query_project_list)
+        # self.kernel.add_function("zentao_projects", self.query_project_detail)
         
     def _ensure_client(self) -> ZenTaoClient:
         """确保客户端已初始化"""
@@ -277,7 +277,7 @@ class ZenTaoMCPServer:
             client = self._ensure_client()
             
             # 获取缺陷详细数据
-            bug_detail_response = client.bugs.get_bug_detail(str(bug_id))
+            bug_detail_response = client.bugs.get_bug_detail(bug_id)
             
             if not bug_detail_response:
                 return f"❌ 未找到ID为 {bug_id} 的缺陷"
