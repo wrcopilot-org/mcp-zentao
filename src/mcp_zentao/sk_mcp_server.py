@@ -14,12 +14,16 @@
 import os
 import sys
 import logging
-from typing import Literal, Optional, List, Dict, Any
+import re
+import mimetypes
+from typing import Literal, Optional, List, Dict, Any, Union
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 from semantic_kernel import Kernel
 from semantic_kernel.functions import kernel_function
+from semantic_kernel.contents import ChatMessageContent, ImageContent, TextContent
+from semantic_kernel.contents.binary_content import BinaryContent
 
 from .client.zentao_client import ZenTaoClient
 from .models.user import UserModel
@@ -263,14 +267,14 @@ class ZenTaoMCPServer:
         description="查询指定缺陷的详细信息，包含基本信息、重现步骤、附件和历史记录",
         name="query_bug_detail"
     )
-    def query_bug_detail(self, bug_id: int) -> str:
+    def query_bug_detail(self, bug_id: int):
         """查询指定缺陷的详细信息
         
         Args:
             bug_id: 缺陷ID
             
         Returns:
-            缺陷详细信息的格式化字符串
+            缺陷的详细信息
         """
         try:
             self._ensure_logged_in()
@@ -280,11 +284,15 @@ class ZenTaoMCPServer:
             bug_detail_response = client.bugs.get_bug_detail(bug_id)
             
             if not bug_detail_response:
-                return f"❌ 未找到ID为 {bug_id} 的缺陷"
+                return ChatMessageContent(role="tool", items=[TextContent(text=f"❌ 未找到ID为 {bug_id} 的缺陷")])
             
             # 解析详细数据
             bug_detail_data = bug_detail_response.get_bug_detail_data()
             bug = bug_detail_data.bug
+            
+            # 存储找到的图片、附件和相关信息
+            image_urls, file_urls = [], []
+            image_counter = 0
             
             # 构建详细信息
             result = f"缺陷详细信息 - #{bug.id}\n"
@@ -344,16 +352,37 @@ class ZenTaoMCPServer:
             result += SUBSECTION_SEPARATOR + "\n"
             
             if bug.steps:
-                import re
                 html_content = bug.steps
                 
-                # 处理图片标签，转换为markdown格式
+                # 处理图片标签，标记并收集URI
                 zentao_base_url = client.base_url
+                
+                def image_replacer(match):
+                    nonlocal image_counter, image_urls
+                    
+                    # 提取图片路径
+                    img_path = match.group(1)
+                    full_url = f"{zentao_base_url}{img_path}"
+                    
+                    # 提取文件名
+                    filename = img_path.split('/')[-1] if '/' in img_path else img_path
+                    
+                    image_counter += 1
+                    image_placeholder = f"![{filename}]({full_url})"
+                    
+                    # 记录图片信息
+                    image_urls.append({
+                        'url': full_url,
+                        'filename': filename,
+                        'placeholder': image_placeholder
+                    })
+                    
+                    return image_placeholder
                 
                 # 先处理以/zentao/开头的相对路径图片
                 html_content = re.sub(
                     r'<img[^>]*src="/zentao/([^"]*)"[^>]*>', 
-                    f'![图片]({zentao_base_url}\\1)', 
+                    image_replacer, 
                     html_content
                 )
                 
@@ -381,20 +410,24 @@ class ZenTaoMCPServer:
                 session_id = client.session_id or ""
                 
                 for file_id, file_info in bug.files.items():
-                    title = file_info.get("title", "未知文件")
-                    extension = file_info.get("extension", "").lower()
-                    size = file_info.get("size", "0")
-                    size_kb = round(int(size) / 1024, 2) if size.isdigit() else "未知"
-                    
-                    # 文件类型图标
-                    file_icon = "🖼️" if extension in ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'] else "📄"
-                    
-                    # 构建下载链接
-                    download_url = f"{zentao_base_url}file-download-{file_id}.html?zentaosid={session_id}"
-                    
-                    result += f"{file_icon} {title}\n"
-                    result += f"   💾 大小: {size_kb}KB | 📎 格式: {extension.upper() or '未知'}\n"
-                    result += f"   🔗 下载: {download_url}\n\n"
+                    # 收集附件信息
+                    file_urls.append({
+                        'id': file_id,
+                        'url': f"{zentao_base_url}file-download-{file_id}.html?zentaosid={session_id}",
+                        'title': file_info.get("title", "未知文件"),
+                        'filename': file_info.get("pathname", "未知文件"),
+                        'extension': file_info.get("extension", "").lower(),
+                        'mime_type': mimetypes.guess_type(file_info.get("title", "file.bin"))[0] or "application/octet-stream",
+                        'size': file_info.get("size", "0")
+                    })
+
+                    size = int(file_info.get("size", "0"))
+                    size_kb = round(size / 1024, 2)
+
+                    result += f"📎 {file_urls[-1]['title']}\n"
+                    result += f"   💾 大小: {size_kb}KB\n"
+                    result += f"   📎 类型: {file_urls[-1]['mime_type']}\n"
+                    result += f"   🔗 下载: {file_urls[-1]['url']}\n\n"
             
             # ===============================
             # 历史记录部分  
@@ -415,15 +448,11 @@ class ZenTaoMCPServer:
                 
                 for action_id, action in recent_actions:
                     date = action.date or '未知时间'
-                    actor = get_user_name(action.actor)
-                    comment = action.comment
                     
                     # 使用枚举的显示方法获取图标和中文显示
-                    action_icon = action.action.emoji
-                    action_display = str(action.action)
-                    
-                    result += f"{action_icon} {date} - {actor} {action_display}\n"
-                    
+                    result += f"{action.action.emoji} {date} - " \
+                        f"{get_user_name(action.actor)} {str(action.action)} {action.extra and get_user_name(action.extra)}\n"
+
                     # 显示历史变更
                     if action.history:
                         for change in action.history:
@@ -433,24 +462,50 @@ class ZenTaoMCPServer:
                                 result += f"   🔄 解决时间: {change.new}\n"
                             if change.field == "resolvedBy":
                                 result += f"   🔄 解决人: {get_user_name(change.new)}\n"
-                            if change.field == "assignedTo":
-                                result += f"   🔄 任务指派: {get_user_name(change.old)} → {get_user_name(change.new)}\n"
                         result += "\n"
-                    if comment:
+                    if action.comment:
                         # 清理评论中的HTML
-                        clean_comment = re.sub(r'<[^>]+>', '', comment).strip()
+                        clean_comment = re.sub(r'<[^>]+>', '', action.comment).strip()
                         if clean_comment:
-                            result += f"   💭 {clean_comment}\n"
+                            result += f"   💭 评论: {clean_comment}\n"
                     result += "\n"
                 
                 if len(sorted_actions) > MAX_HISTORY_RECORDS:
                     result += f"... 还有 {len(sorted_actions) - MAX_HISTORY_RECORDS} 条历史记录\n\n"
             
-            return result
+            # ===============================
+            # 构建多模态返回结果
+            # ===============================
+            contents = [TextContent(text=result)]
+            
+            # 添加收集到的图片内容
+            for img_info in image_urls:
+                try:
+                    # 创建图片内容
+                    contents.append(ImageContent(uri=img_info['url']))
+                    logger.info(f"添加图片: {img_info['filename']}")
+                except Exception as e:
+                    logger.warning(f"无法加载图片 {img_info['filename']}: {e}")
+                    # 如果图片加载失败，在文本中添加说明
+                    error_note = f"\n⚠️ 图片加载失败: {img_info['filename']}\n"
+                    contents.append(TextContent(text=contents[0].text + error_note))
+
+            # 添加收集到的附件内容
+            for file_info in file_urls:
+                try:
+                    contents.append(BinaryContent(uri=file_info['url'], mime_type=file_info['mime_type']))
+                    logger.info(f"添加文件附件: {file_info['filename']}")
+                except Exception as e:
+                    logger.warning(f"无法处理附件 {file_info['filename']}: {e}")
+                    # 如果附件处理失败，在文本中添加说明
+                    error_note = f"\n⚠️ 附件处理失败: {file_info['filename']}\n"
+                    contents.append(TextContent(text=contents[0].text + error_note))
+
+            return ChatMessageContent(role="tool", items=contents)
             
         except Exception as e:
             logger.error(f"查询缺陷详情失败: {e}")
-            return f"查询缺陷详情失败：{str(e)}"
+            return ChatMessageContent(role="tool", items=[TextContent(text=f"查询缺陷详情失败：{str(e)}")])
     
     # ===============================
     # 任务管理函数
