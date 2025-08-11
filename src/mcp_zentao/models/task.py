@@ -254,28 +254,6 @@ class TaskModel(BaseModel):
             "完成": self.status == TaskStatus.DOING
         }
 
-    def display_summary(self) -> str:
-        """格式化的展示摘要"""
-        fields = self.display_fields()
-        actions = self.available_actions()
-        
-        lines = []
-        lines.append("=" * 50)
-        lines.append(f"任务详情: {fields['任务名称']}")
-        lines.append("=" * 50)
-        
-        # 基本信息
-        for key, value in fields.items():
-            lines.append(f"{key:8}: {value}")
-        
-        # 可用操作
-        lines.append("\n可用操作:")
-        for action, available in actions.items():
-            status = "✓" if available else "✗"
-            lines.append(f"  {status} {action}")
-        
-        return "\n".join(lines)
-
 
 class TaskListData(BaseModel):
     """任务列表数据结构"""

@@ -217,49 +217,6 @@ class ProjectModel(BaseModel):
             "删除": self.status == ProjectStatus.CLOSED
         }
 
-    def display_summary(self) -> str:
-        """格式化的展示摘要"""
-        fields = self.display_fields()
-        actions = self.available_actions()
-        
-        lines = []
-        lines.append("=" * 50)
-        lines.append(f"项目详情: {fields['项目名称']}")
-        lines.append("=" * 50)
-        
-        # 基本信息
-        for key, value in fields.items():
-            lines.append(f"{key:10}: {value}")
-        
-        # 团队信息
-        lines.append(f"\n团队信息:")
-        if self.PO:
-            lines.append(f"  产品负责人: {self.PO}")
-        if self.PM:
-            lines.append(f"  项目经理  : {self.PM}")
-        if self.QD:
-            lines.append(f"  测试负责人: {self.QD}")
-        if self.RD:
-            lines.append(f"  开发负责人: {self.RD}")
-        
-        # 进度信息
-        lines.append(f"\n工时统计:")
-        lines.append(f"  预估工时  : {self.estimate}")
-        lines.append(f"  已消耗    : {self.consumed}")
-        lines.append(f"  剩余工时  : {self.left}")
-        
-        # 延期情况
-        if hasattr(self, 'delay') and self.delay and self.delay > 0:
-            lines.append(f"  延期天数  : {self.delay}天")
-        
-        # 可用操作
-        lines.append(f"\n可用操作:")
-        for action, available in actions.items():
-            status = "✓" if available else "✗"
-            lines.append(f"  {status} {action}")
-        
-        return "\n".join(lines)
-
 
 class ProjectListData(BaseModel):
     """项目列表数据结构"""

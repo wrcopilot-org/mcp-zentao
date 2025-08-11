@@ -286,7 +286,7 @@ class ZenTaoMCPServer:
             bug_detail_data = bug_detail_response.get_bug_detail_data()
             bug = bug_detail_data.bug
             
-            # 构建详细信息，参考 BugDetailData.display_summary 的结构
+            # 构建详细信息
             result = f"缺陷详细信息 - #{bug.id}\n"
             result += SECTION_SEPARATOR + "\n"
             result += f"📋 标题: {bug.title}\n\n"
@@ -347,7 +347,7 @@ class ZenTaoMCPServer:
                 import re
                 html_content = bug.steps
                 
-                # 处理图片标签，转换为markdown格式，参考BugDetailData.display_summary的方式
+                # 处理图片标签，转换为markdown格式
                 zentao_base_url = client.base_url
                 
                 # 先处理以/zentao/开头的相对路径图片
@@ -370,7 +370,7 @@ class ZenTaoMCPServer:
                 result += "暂无重现步骤描述\n"
             result += "\n"
             
-            # ===============================  
+            # ===============================
             # 附件部分
             # ===============================
             if bug.files:
