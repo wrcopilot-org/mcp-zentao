@@ -481,7 +481,6 @@ class ZenTaoMCPServer:
             # 添加收集到的图片内容
             for img_info in image_urls:
                 try:
-                    # 创建图片内容
                     contents.append(ImageContent(uri=img_info['url']))
                     logger.info(f"添加图片: {img_info['filename']}")
                 except Exception as e:
