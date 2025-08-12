@@ -35,9 +35,9 @@ PROJECT_SORT_KEY_MAPPING: Dict[str, str] = {
 # ===============================
 
 # 默认分页配置
-DEFAULT_PAGE_SIZE = 50
-MAX_PAGES_LIMIT = 20
-MAX_SINGLE_PAGE_SIZE = 100
+DEFAULT_PAGE_SIZE = 20
+MAX_SINGLE_PAGE_SIZE = 2000
+MAX_PAGES_LIMIT = 100
 
 # ===============================
 # 显示配置

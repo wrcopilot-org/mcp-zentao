@@ -221,7 +221,7 @@ class TaskModel(BaseModel):
         """返回与禅道界面字段匹配的有序字典"""
         return OrderedDict([
             ("ID", self.id),
-            ("P", self.pri.value),  # P 很可能是 Priority 的缩写
+            ("P", self.pri.value),
             ("所属项目", self.projectName),
             ("任务名称", self.name),
             ("创建", self.openedBy),
@@ -291,7 +291,7 @@ class TaskDetailData(BaseModel):
     """任务详情数据结构（来自API的data字段）"""
     title: str = Field(description="页面标题")
     project: Dict[str, Any] = Field(description="项目信息")
-    task: Dict[str, Any] = Field(description="任务详细信息")  # 使用Dict来避免字段不匹配
+    task: Dict[str, Any] = Field(description="任务详细信息")
     actions: Dict[str, Dict[str, Any]] = Field(description="操作历史")
     users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
     preAndNext: Dict[str, Any] = Field(description="前一个和后一个任务")

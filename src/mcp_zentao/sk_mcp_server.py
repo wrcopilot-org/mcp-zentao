@@ -187,20 +187,20 @@ class ZenTaoMCPServer:
         name="query_bug_list"
     )
     def query_bug_list(
-        self, 
-        status: str = "all", 
+        self,
         limit: int = 0,
+        status: str = "all",
         sort_order: str = "latest"
     ) -> str:
         """查询缺陷清单
         
         Args:
+            limit: 返回数量限制，0表示获取全部（默认）
             status: 缺陷状态筛选
                    - "all": 所有状态（默认）
                    - "active": 激活状态
                    - "resolved": 已解决
                    - "closed": 已关闭
-            limit: 返回数量限制，0表示获取全部（默认）
             sort_order: 排序方式
                        - "latest": 最新优先（默认）
                        - "oldest": 最旧优先
@@ -225,7 +225,7 @@ class ZenTaoMCPServer:
                 bugs = client.bugs.get_my_bugs(
                     status=status_param,
                     page=1,
-                    per_page=min(limit, MAX_SINGLE_PAGE_SIZE),  # 使用常量
+                    per_page=min(limit, MAX_SINGLE_PAGE_SIZE),
                     sort_key=sort_key
                 )
                 bugs = bugs[:limit]  # 截取指定数量
@@ -233,9 +233,9 @@ class ZenTaoMCPServer:
                 # 获取所有页面数据
                 bugs = client.bugs.get_my_bugs_all_pages(
                     status=status_param,
-                    per_page=DEFAULT_PAGE_SIZE,  # 使用常量
+                    per_page=DEFAULT_PAGE_SIZE,
                     sort_key=sort_key,
-                    max_pages=MAX_PAGES_LIMIT  # 使用常量
+                    max_pages=MAX_PAGES_LIMIT
                 )
             
             if not bugs:
@@ -515,21 +515,21 @@ class ZenTaoMCPServer:
         name="query_task_list"
     )
     def query_task_list(
-        self, 
-        status: str = "all", 
+        self,
         limit: int = 0,
+        status: str = "all",
         sort_order: str = "latest"
     ) -> str:
         """查询任务清单
         
         Args:
+            limit: 返回数量限制，0表示获取全部（默认）
             status: 任务状态筛选
                    - "all": 所有状态（默认）
                    - "wait": 等待处理
                    - "doing": 进行中
                    - "done": 已完成
                    - "closed": 已关闭
-            limit: 返回数量限制，0表示获取全部（默认）
             sort_order: 排序方式
                        - "latest": 最新优先（默认）
                        - "oldest": 最旧优先
@@ -554,7 +554,7 @@ class ZenTaoMCPServer:
                 tasks = client.tasks.get_my_tasks(
                     status=status_param,
                     page=1,
-                    per_page=min(limit, MAX_SINGLE_PAGE_SIZE),  # 使用常量
+                    per_page=min(limit, MAX_SINGLE_PAGE_SIZE),
                     sort_key=sort_key
                 )
                 tasks = tasks[:limit]  # 截取指定数量
@@ -562,9 +562,9 @@ class ZenTaoMCPServer:
                 # 获取所有页面数据
                 tasks = client.tasks.get_my_tasks_all_pages(
                     status=status_param,
-                    per_page=DEFAULT_PAGE_SIZE,  # 使用常量
+                    per_page=DEFAULT_PAGE_SIZE,
                     sort_key=sort_key,
-                    max_pages=MAX_PAGES_LIMIT  # 使用常量
+                    max_pages=MAX_PAGES_LIMIT
                 )
             
             if not tasks:
@@ -611,7 +611,7 @@ class ZenTaoMCPServer:
             task_id: 任务ID
             
         Returns:
-            任务详细信息的格式化字符串
+            任务的详细信息
         """
         try:
             self._ensure_logged_in()
@@ -675,45 +675,35 @@ class ZenTaoMCPServer:
     # ===============================
     
     @kernel_function(
-        description="查询我参与的项目清单，基础的项目信息概览",
+        description="查询我正在进行中的项目清单，基础的项目信息概览",
         name="query_project_list"
     )
-    def query_project_list(self, limit: int = 20) -> str:
-        """查询我参与的项目清单
+    def query_project_list(
+        self,
+        limit: int = 20,
+        status: str = "all",
+        sort_order: str = "latest"
+    ) -> str:
+        """查询我正在进行中的项目清单
         
         Args:
             limit: 返回数量限制，默认20个项目
-            
+            status: 项目状态筛选
+                   - "all": 所有状态（默认）
+                   - "active": 激活状态
+                   - "resolved": 已解决
+                   - "closed": 已关闭
+            sort_order: 排序方式
+                   - "latest": 最新
+                   - "oldest": 最旧
         Returns:
-            项目清单的格式化字符串
+            项目清单信息
         """
         try:
             self._ensure_logged_in()
             client = self._ensure_client()
             
-            projects = client.projects.get_my_projects(
-                page=1,
-                per_page=limit,
-                sort_key="id_desc"
-            )
-            
-            if not projects:
-                return "📭 您当前没有参与任何项目"
-            
-            result = f"我参与的项目（共 {len(projects)} 个）\n"
-            result += SECTION_SEPARATOR + "\n"
-            
-            for i, project in enumerate(projects, 1):
-                # 使用模型的显示方法，避免硬编码映射
-                status_text = project.get_status_display_with_emoji()
-                
-                result += f"{i:2d}. [{project.id:>4}] {project.name}\n"
-                result += f"    状态: {status_text}\n"
-                if project.begin and project.end:
-                    result += f"    时间: {project.begin} ~ {project.end}\n"
-                result += f"    {SUBSECTION_SEPARATOR}\n"
-            
-            return result
+            raise NotImplementedError(f"📭 您当前没有参与任何项目")
             
         except Exception as e:
             logger.error(f"查询项目列表失败: {e}")
@@ -736,33 +726,7 @@ class ZenTaoMCPServer:
             self._ensure_logged_in()
             client = self._ensure_client()
             
-            project = client.projects.get_project_by_id(project_id)
-            
-            if not project:
-                return f"❌ 未找到ID为 {project_id} 的项目"
-            
-            # 使用模型的显示方法，避免硬编码映射
-            status_text = project.get_status_display_with_emoji()
-            
-            result = f"项目详细信息 - #{project.id}\n"
-            result += SECTION_SEPARATOR + "\n"
-            result += f"📋 项目名称: {project.name}\n"
-            result += f"📊 状态: {status_text}\n"
-            result += f"👨‍💼 项目经理: {project.PM or '未指定'}\n"
-            
-            if project.begin and project.end:
-                result += f"📅 项目周期: {project.begin} ~ {project.end}\n"
-            elif project.begin:
-                result += f"📅 开始时间: {project.begin}\n"
-                
-            if hasattr(project, 'team') and project.team:
-                result += f"👥 团队成员: {project.team}\n"
-                
-            result += "\n📝 项目描述:\n"
-            result += SUBSECTION_SEPARATOR + "\n"
-            result += f"{project.desc or '无项目描述'}\n"
-            
-            return result
+            raise NotImplementedError(f"❌ 未找到ID为 {project_id} 的项目")
             
         except Exception as e:
             logger.error(f"查询项目详情失败: {e}")
