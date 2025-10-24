@@ -10,4 +10,5 @@ wheels/
 .venv
 
 # 测试输出
+.env
 test_outputs/
