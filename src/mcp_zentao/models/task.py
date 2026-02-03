@@ -262,6 +262,7 @@ class TaskListItem(BaseModel):
     name: str = Field(description="任务名称")
     status: str | TaskStatus | None = Field(default=None, description="任务状态")
     pri: int | str | None = Field(default=None, description="优先级")
+    project: str | None = Field(default=None, description="项目ID")
     assignedTo: str | None = Field(default=None, description="指派人")
     openedBy: str | None = Field(default=None, description="创建人")
     openedDate: str | None = Field(default=None, description="创建时间")
