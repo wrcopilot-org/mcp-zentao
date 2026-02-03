@@ -1,16 +1,12 @@
 {
 	"servers": {
-		// "mcp-zentao": {
-		// 	"type": "sse",
-		// 	"url": "http://localhost:8080/sse"
-		// }
 		"mcp-zentao": {
 			"type": "stdio",
 			"command": "uvx",
 			"args": [
 				"--from",
-				// "git+https://github.com/wrcopilot-org/mcp-zentao",
-				"${workspaceFolder}",
+				// "${workspaceFolder}",
+				"git+https://github.com/wrcopilot-org/mcp-zentao",
 				"mcp-zentao"
 			],
 			"env": {

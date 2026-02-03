@@ -21,7 +21,6 @@ build-backend = "hatchling.build"
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "python-dotenv",
     "schemathesis",
 ]
 
