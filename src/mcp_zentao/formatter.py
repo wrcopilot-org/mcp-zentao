@@ -42,7 +42,7 @@ def convert_html_to_markdown(html: str | None, base_url: str) -> str:
         if src.startswith("/"):
             src = f"{base}{src}"
 
-        return f"![{alt}]({src})"
+        return f"![{alt or 'image'}]({src})"
 
     result = re.sub(r"<img[^>]*>", replace_img, result, flags=re.IGNORECASE)
 
