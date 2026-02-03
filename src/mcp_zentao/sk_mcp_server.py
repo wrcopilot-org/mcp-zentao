@@ -27,6 +27,7 @@ from .constants import (
     MAX_SINGLE_PAGE_SIZE,
     TASK_SORT_KEY_MAPPING,
 )
+from .formatter import convert_html_to_markdown
 from .models.user import UserModel
 
 
@@ -370,7 +371,7 @@ class ZenTaoMCPServer:
                     for module in bug_detail_data.modulePath
                     if module.get("name")
                 ],
-                "steps": bug.steps,
+                "steps": convert_html_to_markdown(bug.steps, client.base_url),
                 "files": bug.files,
                 "actions": [
                     {

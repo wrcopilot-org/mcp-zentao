@@ -99,7 +99,7 @@ class TaskClient(BaseClient):
         
         return all_tasks
     
-    def get_task_by_id(self, task_id: int) -> Dict[str, Any]:
+    def get_task_by_id(self, task_id: int) -> TaskModel:
         """根据任务ID获取任务的详细信息
         
         Args:

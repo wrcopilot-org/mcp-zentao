@@ -262,13 +262,9 @@ class TaskListItem(BaseModel):
 
 class TaskListData(BaseModel):
     """任务列表数据结构"""
-    tasks: List[TaskListItem] = Field(description="任务列表")
+    tasks: List[TaskModel] = Field(description="任务列表")
     users: Dict[str, str] = Field(default_factory=dict, description="用户列表映射")
     pager: Dict[str, Any] | None = Field(default=None, description="分页信息")
-    
-    def get_task_list(self) -> List[TaskListItem]:
-        """获取任务列表"""
-        return self.tasks
 
 
 class TaskListResponse(BaseModel):
@@ -285,7 +281,7 @@ class TaskListResponse(BaseModel):
     def get_task_list(self) -> List[TaskModel]:
         """获取任务列表"""
         task_data = self.get_task_data()
-        return task_data.get_task_list()
+        return task_data.tasks
     
     def get_task_list_data(self) -> Dict[str, Any]:
         """获取原始任务列表数据（用于分页）"""
@@ -295,9 +291,9 @@ class TaskListResponse(BaseModel):
 
 class TaskDetailData(BaseModel):
     """任务详情数据结构（来自API的data字段）"""
+    task: TaskModel = Field(description="任务详细信息")
     title: str = Field(description="页面标题")
     project: Dict[str, Any] = Field(description="项目信息")
-    task: Dict[str, Any] = Field(description="任务详细信息")
     actions: Dict[str, Dict[str, Any]] = Field(description="操作历史")
     users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
     preAndNext: Dict[str, Any] = Field(description="前一个和后一个任务")
@@ -318,7 +314,7 @@ class TaskDetailResponse(BaseModel):
         parsed_data = json.loads(self.data)
         return TaskDetailData.model_validate(parsed_data)
     
-    def get_task(self) -> Dict[str, Any]:
+    def get_task(self) -> TaskModel:
         """获取任务详细信息"""
         detail_data = self.get_task_detail_data()
         return detail_data.task

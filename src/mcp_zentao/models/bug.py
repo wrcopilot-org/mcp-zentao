@@ -607,45 +607,6 @@ class BugDetailData(BaseModel):
     builds: Dict[str, str] = Field(description="版本构建列表")
     preAndNext: Dict[str, Any] = Field(description="前一个和后一个缺陷")
     pager: Optional[Any] = Field(default=None, description="分页信息")
-    
-    @staticmethod
-    def _clean_html_content(html_content: str) -> str:
-        """清理HTML内容，转换为纯文本格式
-        
-        Args:
-            html_content: 包含HTML标签的文本内容
-            
-        Returns:
-            清理后的纯文本内容
-        """
-        if not html_content:
-            return ""
-        
-        import re
-        cleaned_text = html_content
-        
-        # 处理段落标签
-        cleaned_text = re.sub(r'<p[^>]*>', '\n', cleaned_text)
-        cleaned_text = cleaned_text.replace("</p>", "\n")
-        
-        # 处理样式标签
-        cleaned_text = re.sub(r'<span[^>]*>', '', cleaned_text)
-        cleaned_text = cleaned_text.replace("</span>", "")
-        
-        # 处理换行标签
-        cleaned_text = cleaned_text.replace("<br />", "\n").replace("<br>", "\n")
-        
-        # 移除其他常见的HTML标签
-        cleaned_text = re.sub(r'<[^>]+>', '', cleaned_text)
-        
-        # 清理换行符
-        cleaned_text = cleaned_text.replace("\r\n", "\n").replace("\r", "\n")
-        
-        # 移除HTML实体编码（基本的）
-        cleaned_text = cleaned_text.replace("&lt;", "<").replace("&gt;", ">")
-        cleaned_text = cleaned_text.replace("&amp;", "&").replace("&nbsp;", " ")
-        
-        return cleaned_text.strip()
 
 
 class BugDetailResponse(BaseModel):
