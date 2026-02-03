@@ -513,68 +513,25 @@ class BugModel(BaseModel):
 
     def _get_severity_display(self) -> str:
         """获取严重程度的中文显示"""
-        severity_map = {
-            BugSeverity.LOWEST: "1-建议",
-            BugSeverity.LOW: "2-一般", 
-            BugSeverity.NORMAL: "3-重要",
-            BugSeverity.HIGH: "4-严重"
-        }
-        return severity_map.get(self.severity, str(self.severity.value))
+        return str(self.severity)
 
     def _get_priority_display(self) -> str:
         """获取优先级的中文显示"""
-        priority_map = {
-            BugPriority.NONE: "无",
-            BugPriority.HIGH: "高",
-            BugPriority.NORMAL: "中", 
-            BugPriority.LOW: "低",
-            BugPriority.URGENT: "紧急"
-        }
-        return priority_map.get(self.pri, str(self.pri.value))
+        return str(self.pri)
 
     def _get_type_display(self) -> str:
         """获取类型的中文显示"""
-        type_map = {
-            BugType.CODEERROR: "代码错误",
-            BugType.INTERFACE: "界面优化",
-            BugType.CONFIG: "配置相关",
-            BugType.INSTALL: "安装部署",
-            BugType.SECURITY: "安全相关",
-            BugType.PERFORMANCE: "性能问题",
-            BugType.STANDARD: "标准规范",
-            BugType.AUTOMATION: "测试脚本",
-            BugType.OTHERS: "其他",
-            BugType.GNWT: "功能问题",
-            BugType.JMLJ: "界面逻辑",
-            BugType.LWT: "逻辑问题",
-            BugType.SJQX: "数据缺陷"
-        }
-        return type_map.get(self.type, self.type.value)
+        return str(self.type)
 
     def _get_resolution_display(self) -> str:
         """获取解决方案的中文显示"""
         if self.resolution is None:
             return ""
-        
-        resolution_map = {
-            BugResolution.FIXED: "已修复",
-            BugResolution.POSTPONED: "延期处理",
-            BugResolution.WILLNOTFIX: "不予修复",
-            BugResolution.BYDESIGN: "设计如此",
-            BugResolution.DUPLICATE: "重复Bug",
-            BugResolution.EXTERNAL: "外部原因",
-            BugResolution.NOTREPRO: "无法重现"
-        }
-        return resolution_map.get(self.resolution, self.resolution.value)
+        return str(self.resolution)
 
     def _get_status_display(self) -> str:
         """获取状态的中文显示"""
-        status_map = {
-            BugStatus.ACTIVE: "激活",
-            BugStatus.RESOLVED: "已解决",
-            BugStatus.CLOSED: "已关闭"
-        }
-        return status_map.get(self.status, self.status.value)
+        return str(self.status)
 
     def available_actions(self) -> Dict[str, bool]:
         """返回可用操作的状态"""

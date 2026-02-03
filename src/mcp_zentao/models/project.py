@@ -70,6 +70,18 @@ class ProjectPriority(int, Enum):
     NORMAL = 2   # 正常
     HIGH = 3     # 高
     URGENT = 4   # 紧急
+    
+    def __str__(self) -> str:
+        """返回中文描述"""
+        return {
+            1: "低",
+            2: "正常",
+            3: "高",
+            4: "紧急"
+        }.get(self.value, f"级别{self.value}")
+    
+    def __repr__(self) -> str:
+        return self.__str__()
 
 
 class ProjectModel(BaseModel):
@@ -167,13 +179,7 @@ class ProjectModel(BaseModel):
 
     def _get_status_display(self) -> str:
         """获取状态的中文显示"""
-        status_map = {
-            ProjectStatus.WAIT: "未开始",
-            ProjectStatus.DOING: "进行中",
-            ProjectStatus.SUSPENDED: "已挂起",
-            ProjectStatus.CLOSED: "已关闭"
-        }
-        return status_map.get(self.status, self.status.value)
+        return str(self.status)
 
     def _get_role_display(self) -> str:
         """获取角色的中文显示"""
@@ -198,13 +204,7 @@ class ProjectModel(BaseModel):
 
     def _get_priority_display(self) -> str:
         """获取优先级的中文显示"""
-        priority_map = {
-            ProjectPriority.LOW: "低",
-            ProjectPriority.NORMAL: "正常",
-            ProjectPriority.HIGH: "高", 
-            ProjectPriority.URGENT: "紧急"
-        }
-        return priority_map.get(self.pri, str(self.pri.value))
+        return str(self.pri)
 
     def available_actions(self) -> Dict[str, bool]:
         """返回可用操作的状态"""

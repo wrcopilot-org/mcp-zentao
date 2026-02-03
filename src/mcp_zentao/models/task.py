@@ -236,15 +236,7 @@ class TaskModel(BaseModel):
 
     def _get_status_display(self) -> str:
         """获取状态的中文显示"""
-        status_map = {
-            TaskStatus.WAIT: "未开始",
-            TaskStatus.DOING: "进行中", 
-            TaskStatus.DONE: "已完成",
-            TaskStatus.PAUSE: "已暂停",
-            TaskStatus.CANCEL: "已取消",
-            TaskStatus.CLOSED: "已关闭"
-        }
-        return status_map.get(self.status, self.status.value)
+        return str(self.status)
 
     def available_actions(self) -> Dict[str, bool]:
         """返回可用操作的状态"""
@@ -262,7 +254,6 @@ class TaskListItem(BaseModel):
     name: str = Field(description="任务名称")
     status: str | TaskStatus | None = Field(default=None, description="任务状态")
     pri: int | str | None = Field(default=None, description="优先级")
-    project: str | None = Field(default=None, description="项目ID")
     assignedTo: str | None = Field(default=None, description="指派人")
     openedBy: str | None = Field(default=None, description="创建人")
     openedDate: str | None = Field(default=None, description="创建时间")
