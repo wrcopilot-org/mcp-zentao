@@ -1,0 +1,1532 @@
+openapi: 3.1.0
+info:
+  title: ZenTao API
+  description: |
+    禅道项目管理系统 API 规范。
+    
+    ## 设计说明
+    
+    本规范基于实际 API 测试验证，作为字段定义的单一真相来源。
+    
+    ### 响应格式特殊性
+    
+    禅道 API 的 `data` 字段通常是 **JSON 字符串**，需要二次解析：
+    ```json
+    {
+      "status": "success",
+      "data": "{\"bugs\": [...], \"pager\": {...}}"
+    }
+    ```
+    
+    ### 验证状态
+    
+    - `x-verified: false` - 已通过实际 API 测试验证
+    - `x-verified: false` - 待验证
+    
+  version: 1.0.0
+  contact:
+    name: mcp-zentao
+  license:
+    name: MIT
+
+servers:
+  - url: '{baseUrl}'
+    description: ZenTao 服务器
+    variables:
+      baseUrl:
+        default: http://localhost
+        description: 禅道服务器地址
+
+tags:
+  - name: session
+    description: 会话管理
+  - name: user
+    description: 用户管理
+  - name: project
+    description: 项目管理
+  - name: task
+    description: 任务管理
+  - name: bug
+    description: 缺陷管理
+
+paths:
+  # ============================================================
+  # Session - 会话管理
+  # ============================================================
+  /api-getSessionID.json:
+    get:
+      operationId: session.get_session_id
+      summary: 获取会话ID
+      description: |
+        获取用于后续 API 调用的会话标识符。
+        
+        **注意**: `data` 字段是 JSON 字符串，需要二次解析。
+      tags: [session]
+      x-verified: false
+      responses:
+        '200':
+          description: 成功获取会话ID
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionIdResponse'
+              example:
+                status: success
+                data: '{"title":"","sessionName":"zentaosid","sessionID":"abc123def456","rand":12345678,"pager":null}'
+
+  /user-login-{sessionid}.json:
+    get:
+      operationId: session.login
+      summary: 用户登录
+      description: 使用用户名和密码进行登录认证。
+      tags: [session]
+      x-verified: false
+      parameters:
+        - $ref: '#/components/parameters/SessionIdPath'
+        - name: account
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 用户名
+        - name: password
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 密码（明文）
+      responses:
+        '200':
+          description: 登录结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /user-logout-{sessionid}.json:
+    get:
+      operationId: session.logout
+      summary: 用户登出
+      tags: [session]
+      x-verified: false
+      parameters:
+        - $ref: '#/components/parameters/SessionIdPath'
+      responses:
+        '200':
+          description: 登出成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BaseResponse'
+
+  # ============================================================
+  # User - 用户管理
+  # ============================================================
+  /company-browse-{dept_id}.json:
+    get:
+      operationId: user.list
+      summary: 获取部门用户列表
+      tags: [user]
+      x-verified: false
+      parameters:
+        - name: dept_id
+          in: path
+          required: true
+          schema:
+            type: string
+            default: '0'
+          description: 部门ID，0 表示全部
+      responses:
+        '200':
+          description: 用户列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringDataResponse'
+
+  # ============================================================
+  # Project - 项目管理
+  # ============================================================
+  /my-project.json:
+    get:
+      operationId: project.my_list
+      summary: 获取我的项目列表
+      tags: [project]
+      x-verified: false
+      responses:
+        '200':
+          description: 项目列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StringDataResponse'
+
+  /project-task-{project_id}.json:
+    get:
+      operationId: project.task_list
+      summary: 获取项目任务列表
+      tags: [project]
+      x-verified: false
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 项目ID
+      responses:
+        '200':
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+
+  /project-bug-{project_id}.json:
+    get:
+      operationId: project.bug_list
+      summary: 获取项目缺陷列表
+      tags: [project]
+      x-verified: false
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 项目ID
+      responses:
+        '200':
+          description: 缺陷列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BugListResponse'
+
+  # ============================================================
+  # Task - 任务管理
+  # ============================================================
+  /my-task.json:
+    get:
+      operationId: task.my_list
+      summary: 获取我的任务列表
+      description: |
+        获取分配给当前用户的任务列表。
+        
+        ### 分页 URL 模板
+        
+        第二页及后续页面使用复合 URL：
+        `my-task-assignedTo-{sort_key}-{rec_total}-{rec_per_page}-{page_id}.json`
+        
+        示例：`my-task-assignedTo-id_desc-301-20-2.json`
+      tags: [task]
+      x-verified: false
+      responses:
+        '200':
+          description: 任务列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+
+  /task-view-{task_id}.json:
+    get:
+      operationId: task.detail
+      summary: 获取任务详情
+      tags: [task]
+      x-verified: false
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+      responses:
+        '200':
+          description: 任务详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskDetailResponse'
+
+  # ============================================================
+  # Bug - 缺陷管理
+  # ============================================================
+  /my-bug.json:
+    get:
+      operationId: bug.my_list
+      summary: 获取我的缺陷列表
+      description: |
+        获取分配给当前用户的缺陷列表。
+        
+        ### 分页 URL 模板
+        
+        第二页及后续页面使用复合 URL：
+        `my-bug-assignedTo-{sort_key}-{rec_total}-{rec_per_page}-{page_id}.json`
+        
+        示例：`my-bug-assignedTo-id_desc-305-20-2.json`
+      tags: [bug]
+      x-verified: false
+      responses:
+        '200':
+          description: 缺陷列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BugListResponse'
+
+  /bug-view-{bug_id}.json:
+    get:
+      operationId: bug.detail
+      summary: 获取缺陷详情
+      tags: [bug]
+      x-verified: false
+      parameters:
+        - name: bug_id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 缺陷ID
+      responses:
+        '200':
+          description: 缺陷详情
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BugDetailResponse'
+
+  # ============================================================
+  # Task Operations - 任务操作 (未验证)
+  # ============================================================
+  /task-create-{project_id}--{module_id}-{sessionid}.json:
+    post:
+      operationId: task.create
+      summary: 创建任务
+      tags: [task]
+      x-verified: false
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TaskCreateRequest'
+      responses:
+        '200':
+          description: 创建结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /task-start-{task_id}-{sessionid}.json:
+    post:
+      operationId: task.start
+      summary: 开始任务
+      tags: [task]
+      x-verified: false
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /task-finish-{task_id}-{sessionid}.json:
+    post:
+      operationId: task.finish
+      summary: 完成任务
+      tags: [task]
+      x-verified: false
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/TaskFinishRequest'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /task-close-{task_id}-{sessionid}.json:
+    post:
+      operationId: task.close
+      summary: 关闭任务
+      tags: [task]
+      x-verified: false
+      parameters:
+        - name: task_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  # ============================================================
+  # Bug Operations - 缺陷操作 (未验证)
+  # ============================================================
+  /bug-create-{product_id}-{branch}-moduleID={module_id}-{sessionid}.json:
+    post:
+      operationId: bug.create
+      summary: 创建缺陷
+      tags: [bug]
+      x-verified: false
+      parameters:
+        - name: product_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: branch
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: module_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BugCreateRequest'
+      responses:
+        '200':
+          description: 创建结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /bug-resolve-{bug_id}-{sessionid}.json:
+    post:
+      operationId: bug.resolve
+      summary: 解决缺陷
+      tags: [bug]
+      x-verified: false
+      parameters:
+        - name: bug_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BugResolveRequest'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /bug-confirmBug-{bug_id}-{sessionid}.json:
+    post:
+      operationId: bug.confirm
+      summary: 确认缺陷
+      tags: [bug]
+      x-verified: false
+      parameters:
+        - name: bug_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      requestBody:
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              $ref: '#/components/schemas/BugConfirmRequest'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /bug-close-{bug_id}-{sessionid}.json:
+    post:
+      operationId: bug.close
+      summary: 关闭缺陷
+      tags: [bug]
+      x-verified: false
+      parameters:
+        - name: bug_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  # ============================================================
+  # Project Operations - 项目操作 (未验证)
+  # ============================================================
+  /project-create-{sessionid}.json:
+    post:
+      operationId: project.create
+      summary: 创建项目
+      tags: [project]
+      x-verified: false
+      parameters:
+        - $ref: '#/components/parameters/SessionIdPath'
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  description: 项目名称
+      responses:
+        '200':
+          description: 创建结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /project-close-{project_id}-{sessionid}.json:
+    post:
+      operationId: project.close
+      summary: 关闭项目
+      tags: [project]
+      x-verified: false
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+  /project-start-{project_id}-{sessionid}.json:
+    post:
+      operationId: project.start
+      summary: 启动项目
+      tags: [project]
+      x-verified: false
+      parameters:
+        - name: project_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/SessionIdPath'
+      responses:
+        '200':
+          description: 操作结果
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OperationResponse'
+
+components:
+  # ============================================================
+  # Parameters
+  # ============================================================
+  parameters:
+    SessionIdPath:
+      name: sessionid
+      in: path
+      required: true
+      schema:
+        type: string
+      description: 会话ID
+
+  # ============================================================
+  # Schemas - 基础响应
+  # ============================================================
+  schemas:
+    ResponseStatus:
+      type: string
+      enum: [success, failed, error]
+      description: |
+        响应状态：
+        - `success` - 请求成功
+        - `failed` - 业务逻辑失败
+        - `error` - 系统错误
+
+    BaseResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        message:
+          type: string
+          description: 错误消息（失败时提供）
+
+    StringDataResponse:
+      type: object
+      description: |
+        data 字段为 JSON 字符串的响应。
+        需要对 data 进行 `JSON.parse()` 二次解析。
+      required: [status, data]
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        data:
+          type: string
+          description: JSON 字符串格式的数据
+        md5:
+          type: string
+          description: 数据校验值
+
+    OperationResponse:
+      type: object
+      description: 操作类 API 的响应
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/ResponseStatus'
+        message:
+          type: string
+        locate:
+          type: string
+          description: 操作成功后的跳转地址
+
+    # ============================================================
+    # Schemas - Session
+    # ============================================================
+    SessionIdResponse:
+      allOf:
+        - $ref: '#/components/schemas/StringDataResponse'
+      description: |
+        会话ID响应。`data` 解析后的结构见 `SessionData`。
+
+    SessionData:
+      type: object
+      description: 会话ID响应的 data 字段解析后的结构
+      required: [sessionName, sessionID, rand]
+      properties:
+        title:
+          type: string
+          default: ''
+        sessionName:
+          type: string
+          description: 会话名称，固定为 "zentaosid"
+          example: zentaosid
+        sessionID:
+          type: string
+          description: 会话ID，后续 API 调用的关键标识
+          minLength: 10
+        rand:
+          type: integer
+          description: 随机数，用于安全验证
+        pager:
+          type: string
+          nullable: true
+
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/StringDataResponse'
+      description: 登录响应
+
+    LoginData:
+      type: object
+      description: 登录成功后的 data 字段解析结构
+      properties:
+        user:
+          $ref: '#/components/schemas/UserInfo'
+
+    UserInfo:
+      type: object
+      properties:
+        id:
+          type: string
+        account:
+          type: string
+          description: 用户名
+        realname:
+          type: string
+          description: 真实姓名
+        role:
+          type: string
+        dept:
+          type: string
+          description: 部门ID
+        email:
+          type: string
+
+    # ============================================================
+    # Schemas - Pagination
+    # ============================================================
+    Pager:
+      type: object
+      description: 分页信息
+      properties:
+        recTotal:
+          type: integer
+          description: 总记录数
+        recPerPage:
+          type: integer
+          description: 每页记录数
+        pageID:
+          type: integer
+          description: 当前页码
+        linkCreator:
+          type: string
+        moduleName:
+          type: string
+        methodName:
+          type: string
+
+    # ============================================================
+    # Schemas - Task
+    # ============================================================
+    TaskStatus:
+      type: string
+      enum: [wait, doing, done, pause, cancel, closed]
+      x-enum-descriptions:
+        wait: 未开始
+        doing: 进行中
+        done: 已完成
+        pause: 已暂停
+        cancel: 已取消
+        closed: 已关闭
+
+    TaskType:
+      type: string
+      enum: [design, devel, test, study, discuss, ui, affair, misc]
+      x-enum-descriptions:
+        design: 设计
+        devel: 开发
+        test: 测试
+        study: 研究
+        discuss: 讨论
+        ui: 界面
+        affair: 事务
+        misc: 其他
+
+    TaskPriority:
+      type: integer
+      enum: [0, 1, 2, 3, 4]
+      x-enum-descriptions:
+        0: 最低
+        1: 低
+        2: 正常
+        3: 高
+        4: 最高
+
+    TaskModel:
+      type: object
+      description: 任务信息
+      required:
+        - id
+        - name
+        - project
+        - status
+      properties:
+        id:
+          type: string
+          description: 任务ID
+        parent:
+          type: string
+          description: 父任务ID，0表示顶级任务
+        project:
+          type: string
+          description: 所属项目ID
+        module:
+          type: string
+          description: 所属模块ID
+        story:
+          type: string
+          description: 关联需求ID
+        storyVersion:
+          type: string
+          description: 需求版本
+        fromBug:
+          type: string
+          description: 来源缺陷ID
+        name:
+          type: string
+          description: 任务名称
+        type:
+          $ref: '#/components/schemas/TaskType'
+        pri:
+          $ref: '#/components/schemas/TaskPriority'
+        desc:
+          type: string
+          description: 任务描述
+        estimate:
+          type: string
+          description: 预估工时
+        consumed:
+          type: string
+          description: 已消耗工时
+        left:
+          type: string
+          description: 剩余工时
+        deadline:
+          type: string
+          description: 截止日期
+        estStarted:
+          type: string
+          description: 预计开始时间
+        realStarted:
+          type: string
+          description: 实际开始时间
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        subStatus:
+          type: string
+          description: 子状态
+        color:
+          type: string
+          description: 颜色标识
+        mailto:
+          type: string
+          nullable: true
+          description: 邮件通知列表
+        openedBy:
+          type: string
+          description: 创建者
+        openedDate:
+          type: string
+          description: 创建时间
+        assignedTo:
+          type: string
+          description: 指派给
+        assignedDate:
+          type: string
+          description: 指派时间
+        finishedBy:
+          type: string
+          description: 完成者
+        finishedDate:
+          type: string
+          description: 完成时间
+        finishedList:
+          type: string
+          description: 完成列表
+        canceledBy:
+          type: string
+          description: 取消者
+        canceledDate:
+          type: string
+          description: 取消时间
+        closedBy:
+          type: string
+          description: 关闭者
+        closedDate:
+          type: string
+          description: 关闭时间
+        closedReason:
+          type: string
+          description: 关闭原因
+        lastEditedBy:
+          type: string
+          description: 最后编辑者
+        lastEditedDate:
+          type: string
+          description: 最后编辑时间
+        deleted:
+          type: string
+          description: 是否删除，0=未删除
+        projectID:
+          type: string
+          description: 项目ID（冗余字段）
+        projectName:
+          type: string
+          description: 项目名称
+        storyID:
+          type: string
+          nullable: true
+        storyTitle:
+          type: string
+          nullable: true
+        storyStatus:
+          type: string
+          nullable: true
+        latestStoryVersion:
+          type: string
+          nullable: true
+        needConfirm:
+          type: boolean
+          description: 是否需要确认
+        progress:
+          type: integer
+          description: 完成进度百分比
+
+    TaskListData:
+      type: object
+      description: 任务列表 data 字段解析后的结构
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskModel'
+        users:
+          type: object
+          additionalProperties:
+            type: string
+          description: 用户名到真实姓名的映射
+        pager:
+          $ref: '#/components/schemas/Pager'
+
+    TaskListResponse:
+      allOf:
+        - $ref: '#/components/schemas/StringDataResponse'
+      description: 任务列表响应
+
+    TaskDetailData:
+      type: object
+      description: 任务详情 data 字段解析后的结构
+      properties:
+        title:
+          type: string
+        project:
+          type: object
+        task:
+          $ref: '#/components/schemas/TaskModel'
+        actions:
+          type: object
+        users:
+          type: object
+          additionalProperties:
+            type: string
+        preAndNext:
+          type: object
+        product:
+          type: string
+        modulePath:
+          type: array
+          items:
+            type: object
+        pager:
+          nullable: true
+
+    TaskDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/StringDataResponse'
+      description: 任务详情响应
+
+    TaskCreateRequest:
+      type: object
+      required: [name, type, assignedTo]
+      properties:
+        name:
+          type: string
+          description: 任务名称
+        type:
+          $ref: '#/components/schemas/TaskType'
+        assignedTo:
+          type: string
+          description: 指派给
+        estimate:
+          type: string
+          default: '0'
+          description: 预估工时
+        deadline:
+          type: string
+          description: 截止日期
+        desc:
+          type: string
+          description: 任务描述
+        pri:
+          $ref: '#/components/schemas/TaskPriority'
+        story:
+          type: string
+          default: '0'
+          description: 关联需求ID
+
+    TaskFinishRequest:
+      type: object
+      required: [consumed]
+      properties:
+        consumed:
+          type: string
+          description: 实际消耗工时
+        left:
+          type: string
+          default: '0'
+          description: 剩余工时
+        comment:
+          type: string
+          description: 完成备注
+
+    # ============================================================
+    # Schemas - Bug
+    # ============================================================
+    BugStatus:
+      type: string
+      enum: [active, resolved, closed]
+      x-enum-descriptions:
+        active: 激活
+        resolved: 已解决
+        closed: 已关闭
+
+    BugSeverity:
+      type: integer
+      enum: [1, 2, 3, 4]
+      x-enum-descriptions:
+        1: 提示
+        2: 其他
+        3: 一般
+        4: 严重
+
+    BugPriority:
+      type: integer
+      enum: [0, 1, 2, 3, 4]
+      x-enum-descriptions:
+        0: 无
+        1: 高
+        2: 中
+        3: 低
+        4: 紧急
+
+    BugType:
+      type: string
+      enum:
+        # 标准类型
+        - codeerror
+        - interface
+        - config
+        - install
+        - security
+        - performance
+        - standard
+        - automation
+        - others
+        # 中文系统扩展类型
+        - gnwt
+        - lwt
+        - jmlj
+        - jmyh
+        - xnwt
+        - jrxwt
+        - sjwt
+        - xgyr
+        - yhfk
+        - xqjy
+        - xzxq
+        - sjqx
+        - pzwt
+        - qt
+      x-enum-descriptions:
+        codeerror: 代码错误
+        interface: 界面优化
+        config: 配置相关
+        install: 安装部署
+        security: 安全相关
+        performance: 性能问题
+        standard: 标准规范
+        automation: 测试脚本
+        others: 其他
+        gnwt: 功能问题
+        lwt: 历史遗留
+        jmlj: 界面交互
+        jmyh: 界面优化
+        xnwt: 性能问题
+        jrxwt: 兼容性问题
+        sjwt: 随机问题
+        xgyr: 修改引入
+        yhfk: 用户反馈
+        xqjy: 需求建议
+        xzxq: 新增需求
+        sjqx: 设计问题
+        pzwt: 配置问题
+        qt: 其他
+
+    BugResolution:
+      type: string
+      enum:
+        - fixed
+        - postponed
+        - willnotfix
+        - bydesign
+        - duplicate
+        - external
+        - notrepro
+        - nonproblem
+      x-enum-descriptions:
+        fixed: 已修复
+        postponed: 延期处理
+        willnotfix: 不予修复
+        bydesign: 设计如此
+        duplicate: 重复Bug
+        external: 外部原因
+        notrepro: 无法重现
+        nonproblem: 非问题
+
+    BugActionType:
+      type: string
+      enum: [opened, commented, assigned, resolved, closed, activated, edited]
+      x-enum-descriptions:
+        opened: 创建
+        commented: 添加备注
+        assigned: 指派给
+        resolved: 解决
+        closed: 关闭
+        activated: 激活
+        edited: 编辑
+
+    BugModel:
+      type: object
+      description: 缺陷信息
+      required:
+        - id
+        - title
+        - product
+        - status
+        - severity
+        - pri
+        - type
+      properties:
+        # 基本标识
+        id:
+          type: string
+          description: 缺陷ID
+        product:
+          type: string
+          description: 所属产品ID
+        branch:
+          type: string
+          description: 分支ID
+        module:
+          type: string
+          description: 所属模块ID
+        project:
+          type: string
+          description: 所属项目ID
+        plan:
+          type: string
+          description: 所属计划ID
+        
+        # 需求关联
+        story:
+          type: string
+          description: 相关需求ID
+        storyVersion:
+          type: string
+          description: 需求版本
+        task:
+          type: string
+          description: 相关任务ID
+        toTask:
+          type: string
+          description: 转任务ID
+        toStory:
+          type: string
+          description: 转需求ID
+        
+        # 缺陷基本信息
+        title:
+          type: string
+          description: 缺陷标题
+        keywords:
+          type: string
+          description: 关键词
+        severity:
+          $ref: '#/components/schemas/BugSeverity'
+        pri:
+          $ref: '#/components/schemas/BugPriority'
+        type:
+          $ref: '#/components/schemas/BugType'
+        os:
+          type: string
+          description: 操作系统
+        browser:
+          type: string
+          description: 浏览器
+        
+        # 重现信息
+        steps:
+          type: string
+          description: 重现步骤（可能包含 HTML）
+        status:
+          $ref: '#/components/schemas/BugStatus'
+        subStatus:
+          type: string
+          description: 子状态
+        color:
+          type: string
+          description: 颜色标识
+        confirmed:
+          type: string
+          description: 是否确认，1=已确认，0=未确认
+        
+        # 创建信息
+        openedBy:
+          type: string
+          description: 创建者
+        openedDate:
+          type: string
+          description: 创建时间
+        openedBuild:
+          type: string
+          description: 创建时的版本
+        
+        # 分配信息
+        assignedTo:
+          type: string
+          description: 指派给
+        assignedDate:
+          type: string
+          description: 指派时间
+        
+        # 解决信息
+        resolvedBy:
+          type: string
+          description: 解决者
+        resolution:
+          $ref: '#/components/schemas/BugResolution'
+        resolvedBuild:
+          type: string
+          description: 解决版本
+        resolvedDate:
+          type: string
+          description: 解决时间
+        
+        # 关闭信息
+        closedBy:
+          type: string
+          description: 关闭者
+        closedDate:
+          type: string
+          description: 关闭时间
+        
+        # 激活信息
+        activatedBy:
+          type: string
+          description: 激活者
+        activatedDate:
+          type: string
+          description: 激活时间
+        activatedCount:
+          type: string
+          description: 激活次数
+        
+        # 邮件通知
+        mailto:
+          type: string
+          description: 邮件通知列表
+        
+        # 编辑信息
+        lastEditedBy:
+          type: string
+          description: 最后编辑者
+        lastEditedDate:
+          type: string
+          description: 最后编辑时间
+        
+        # 删除标识
+        deleted:
+          type: string
+          description: 是否删除，0=未删除
+        
+        # 重复缺陷
+        duplicateBug:
+          type: string
+          description: 重复的缺陷ID
+        linkBug:
+          type: string
+          description: 相关缺陷ID
+        
+        # 用例关联
+        case:
+          type: string
+          description: 相关用例ID
+        caseVersion:
+          type: string
+          description: 用例版本
+        result:
+          type: string
+          description: 测试结果ID
+        
+        # 需求变更
+        feedbackBy:
+          type: string
+          description: 反馈者
+        notifyEmail:
+          type: string
+          description: 通知邮箱
+        
+        # 附件
+        files:
+          type: object
+          additionalProperties:
+            type: object
+          description: 附件文件列表（仅详情响应）
+          nullable: true
+
+    ActionHistoryItem:
+      type: object
+      properties:
+        id:
+          type: string
+          description: 历史记录ID
+        action:
+          type: string
+          description: 关联的操作ID
+        field:
+          type: string
+          description: 变更字段名
+        old:
+          type: string
+          description: 旧值
+        new:
+          type: string
+          description: 新值
+        diff:
+          type: string
+          description: 差异信息
+
+    BugAction:
+      type: object
+      description: 缺陷操作记录
+      properties:
+        id:
+          type: string
+          description: 操作ID
+        objectType:
+          type: string
+          description: 对象类型
+        objectID:
+          type: string
+          description: 对象ID
+        product:
+          type: string
+          description: 产品ID
+        project:
+          type: string
+          description: 项目ID
+        actor:
+          type: string
+          description: 操作者用户名
+        action:
+          $ref: '#/components/schemas/BugActionType'
+        date:
+          type: string
+          description: 操作时间
+        comment:
+          type: string
+          description: 备注内容
+        extra:
+          type: string
+          description: 额外信息
+        read:
+          oneOf:
+            - type: boolean
+            - type: string
+              enum: ['0', '1']
+          description: 是否已读（可能是布尔值或字符串）
+        efforted:
+          oneOf:
+            - type: boolean
+            - type: string
+              enum: ['0', '1']
+          description: 是否计入工时
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/ActionHistoryItem'
+          description: 历史变更记录
+        appendLink:
+          type: string
+          description: 附加链接
+
+    BugListData:
+      type: object
+      description: 缺陷列表 data 字段解析后的结构
+      required: [bugs]
+      properties:
+        bugs:
+          type: array
+          items:
+            $ref: '#/components/schemas/BugModel'
+        users:
+          type: object
+          additionalProperties:
+            type: string
+          description: 用户名到真实姓名的映射
+        pager:
+          $ref: '#/components/schemas/Pager'
+
+    BugListResponse:
+      allOf:
+        - $ref: '#/components/schemas/StringDataResponse'
+      description: 缺陷列表响应
+
+    BugDetailData:
+      type: object
+      description: 缺陷详情 data 字段解析后的结构
+      properties:
+        title:
+          type: string
+          description: 页面标题
+        products:
+          type: object
+          additionalProperties:
+            type: string
+          description: 所有产品列表
+        productID:
+          type: string
+          description: 当前产品ID
+        productName:
+          type: string
+          description: 当前产品名称
+        branches:
+          type: array
+          items: {}
+          description: 分支信息
+        modulePath:
+          type: array
+          items:
+            type: object
+          description: 模块路径
+        bugModule:
+          type: object
+          description: 缺陷所属模块
+        bug:
+          $ref: '#/components/schemas/BugModel'
+        branchName:
+          type: string
+          description: 分支名称
+        users:
+          type: object
+          additionalProperties:
+            type: string
+          description: 用户名到真实姓名的映射
+        actions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/BugAction'
+          description: 操作历史
+        builds:
+          type: object
+          additionalProperties:
+            type: string
+          description: 版本构建列表
+        preAndNext:
+          type: object
+          description: 前一个和后一个缺陷
+        pager:
+          nullable: true
+
+    BugDetailResponse:
+      allOf:
+        - $ref: '#/components/schemas/StringDataResponse'
+      description: 缺陷详情响应
+
+    BugCreateRequest:
+      type: object
+      required: [product, title, type, severity, steps]
+      properties:
+        product:
+          type: string
+          description: 产品ID
+        title:
+          type: string
+          description: 缺陷标题
+        type:
+          $ref: '#/components/schemas/BugType'
+        severity:
+          $ref: '#/components/schemas/BugSeverity'
+        pri:
+          $ref: '#/components/schemas/BugPriority'
+        steps:
+          type: string
+          description: 重现步骤
+        assignedTo:
+          type: string
+          description: 指派给
+        os:
+          type: string
+          description: 操作系统
+        browser:
+          type: string
+          description: 浏览器
+        keywords:
+          type: string
+          description: 关键词
+
+    BugResolveRequest:
+      type: object
+      required: [resolution]
+      properties:
+        resolution:
+          $ref: '#/components/schemas/BugResolution'
+        resolvedBuild:
+          type: string
+          description: 解决版本
+        comment:
+          type: string
+          description: 解决备注
+
+    BugConfirmRequest:
+      type: object
+      properties:
+        assignedTo:
+          type: string
+          description: 指派给
+        comment:
+          type: string
+          description: 确认备注

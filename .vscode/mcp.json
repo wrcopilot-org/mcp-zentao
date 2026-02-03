@@ -1,23 +1,37 @@
 {
 	"servers": {
-		"mcp-zentao": {
-			"type": "sse",
-			"url": "http://0.0.0.0:8080/sse"
-		}
 		// "mcp-zentao": {
-		// 	"type": "stdio",
-		// 	"command": "uvx",
-		// 	"args": [
-		// 		"--from",
-		// 		"git+https://github.com/wrcopilot-org/mcp-zentao",
-		// 		"mcp-zentao"
-		// 	],
-		// 	"env": {
-		// 		"ZENTAO_ACCOUNT": "lianping",
-		// 		"ZENTAO_PASSWORD": "123456",
-		// 		"ZENTAO_HOST": "http://192.168.2.84/zentao/"
-		// 	}
+		// 	"type": "sse",
+		// 	"url": "http://localhost:8080/sse"
 		// }
+		"mcp-zentao": {
+			"type": "stdio",
+			"command": "uvx",
+			"args": [
+				"--from",
+				// "git+https://github.com/wrcopilot-org/mcp-zentao",
+				"${workspaceFolder}",
+				"mcp-zentao"
+			],
+			"env": {
+				"ZENTAO_URL": "http://192.168.2.84/zentao/",
+				"ZENTAO_ACCOUNT": "${input:zentao_account}",
+				"ZENTAO_PASSWORD": "${input:zentao_password}"
+			}
+		}
 	},
-	"inputs": []
+	"inputs": [
+		{
+			"type": "promptString",
+			"id": "zentao_account",
+			"description": "Enter your Zentao account",
+		},
+		{
+			"type": "promptString",
+			"id": "zentao_password",
+			"description": "Enter your Zentao password",
+			"password": true,
+			"default": "123456"
+		}
+	]
 }

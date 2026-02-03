@@ -218,11 +218,23 @@ class ProjectModel(BaseModel):
         }
 
 
+class ProjectListItem(BaseModel):
+    """项目列表项（简化版）"""
+
+    id: str = Field(description="项目ID")
+    name: str = Field(description="项目名称")
+    status: str | ProjectStatus | None = Field(default=None, description="项目状态")
+    pri: int | str | None = Field(default=None, description="优先级")
+    openedBy: str | None = Field(default=None, description="创建人")
+    openedDate: str | None = Field(default=None, description="创建时间")
+
+
 class ProjectListData(BaseModel):
     """项目列表数据结构"""
-    projects: List[ProjectModel] = Field(description="项目列表")
+    projects: List[ProjectListItem] = Field(description="项目列表")
+    pager: Dict[str, Any] | None = Field(default=None, description="分页信息")
     
-    def get_project_list(self) -> List[ProjectModel]:
+    def get_project_list(self) -> List[ProjectListItem]:
         """获取项目列表"""
         return self.projects
 

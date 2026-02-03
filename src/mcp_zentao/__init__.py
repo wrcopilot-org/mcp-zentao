@@ -20,16 +20,23 @@ MCP-ZenTao: 禅道系统的 Model Context Protocol 服务器
     mcp-zentao --base-url http://your-zentao-server.com
 """
 
-from .sk_mcp_server import main, create_server, run, ZenTaoMCPServer
 from .client.zentao_client import ZenTaoClient
+
+try:
+    from .sk_mcp_server import main, create_server, run, ZenTaoMCPServer
+except Exception:  # pragma: no cover - optional dependency during tests
+    main = None
+    create_server = None
+    run = None
+    ZenTaoMCPServer = None
 
 __version__ = "0.1.0"
 __author__ = "nblog"
 
 __all__ = [
     "main",
-    "create_server", 
+    "create_server",
     "run",
     "ZenTaoMCPServer",
-    "ZenTaoClient"
+    "ZenTaoClient",
 ]

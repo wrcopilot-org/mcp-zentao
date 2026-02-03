@@ -13,21 +13,23 @@ from typing import Dict, Any
 BUG_SORT_KEY_MAPPING: Dict[str, str] = {
     "latest": "id_desc",
     "oldest": "id_asc",
-    "priority": "pri_asc"
+    "priority": "pri_asc",
+    "severity": "severity_desc",
 }
 
 # 任务排序映射  
 TASK_SORT_KEY_MAPPING: Dict[str, str] = {
     "latest": "id_desc",
     "oldest": "id_asc",
-    "deadline": "deadline_asc"
+    "deadline": "deadline_desc",
+    "status": "status_asc",
 }
 
 # 项目排序映射
 PROJECT_SORT_KEY_MAPPING: Dict[str, str] = {
     "latest": "id_desc",
     "oldest": "id_asc",
-    "priority": "pri_desc"
+    "end": "end_desc",
 }
 
 # ===============================

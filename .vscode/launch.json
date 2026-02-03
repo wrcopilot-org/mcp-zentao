@@ -11,7 +11,7 @@
             "module": "mcp_zentao.sk_mcp_server",
             "console": "integratedTerminal",
             "cwd": "${workspaceFolder}",
-            "args": ["--transport", "sse"],
+            // "args": ["--transport", "sse"],
             "env": {
                 "PYTHONPATH": "${workspaceFolder}/src"
             },

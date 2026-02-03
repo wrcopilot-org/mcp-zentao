@@ -11,31 +11,49 @@
 - 任务管理
 - 项目管理
 """
-import os
-import sys
 import logging
-import re
-import mimetypes
-from typing import Literal, Optional, List, Dict, Any, Union
-from pydantic import BaseModel, Field
-from dotenv import load_dotenv
+from dataclasses import asdict, dataclass
+from typing import Any, Optional
 
+from pydantic import BaseModel, Field
 from semantic_kernel import Kernel
 from semantic_kernel.functions import kernel_function
-from semantic_kernel.contents import ChatMessageContent, ImageContent, TextContent
-from semantic_kernel.contents.binary_content import BinaryContent
 
 from .client.zentao_client import ZenTaoClient
+from .constants import (
+    BUG_SORT_KEY_MAPPING,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGES_LIMIT,
+    MAX_SINGLE_PAGE_SIZE,
+    TASK_SORT_KEY_MAPPING,
+)
 from .models.user import UserModel
-from .models.bug import BugStatus, BugResolution
-from .models.task import TaskStatus, TaskPriority
-from .models.project import ProjectStatus
-from .constants import *
 
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class ToolResult:
+    """Structured tool result.
+
+    Args:
+        status: success or error.
+        message: Optional message.
+        data: Structured payload.
+    """
+
+    status: str
+    message: str | None
+    data: dict[str, Any] | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert result to dict."""
+
+        result = asdict(self)
+        return {key: value for key, value in result.items() if value is not None}
 
 
 class ZenTaoServerConfig(BaseModel):
@@ -101,6 +119,31 @@ class ZenTaoMCPServer:
         """确保用户已登录"""
         if self.current_user is None:
             raise ValueError("请先登录禅道系统。请使用 login 函数进行登录。")
+
+    def _ok(self, data: dict[str, Any], message: str | None = None) -> dict[str, Any]:
+        """Return success result."""
+
+        return ToolResult(status="success", message=message, data=data).to_dict()
+
+    def _error(self, message: str) -> dict[str, Any]:
+        """Return error result."""
+
+        return ToolResult(status="error", message=message, data=None).to_dict()
+
+    def _user_summary(self, user: UserModel) -> dict[str, Any]:
+        """Extract user summary dict."""
+
+        return {
+            "account": user.account,
+            "realname": user.realname,
+            "email": user.email,
+            "role": user.role,
+        }
+
+    def _status_text(self, status: str, entity: str) -> str:
+        """Generate status description text."""
+
+        return "所有状态" if status == "all" else f"状态为'{status}'"
     
     # ===============================
     # 会话管理函数
@@ -110,7 +153,7 @@ class ZenTaoMCPServer:
         description="登录禅道系统",
         name="login"
     )
-    def login(self, username: str, password: str) -> str:
+    def login(self, username: str, password: str) -> dict[str, Any]:
         """登录禅道系统
         
         Args:
@@ -118,7 +161,7 @@ class ZenTaoMCPServer:
             password: 密码
             
         Returns:
-            登录结果信息
+            登录结果
         """
         try:
             client = self._ensure_client()
@@ -126,21 +169,21 @@ class ZenTaoMCPServer:
             self.current_user = user
             
             logger.info(f"用户 {username} 登录成功")
-            return f"登录成功！欢迎，{user.realname}（{user.account}）"
+            return self._ok({"user": self._user_summary(user)}, message="登录成功")
             
         except Exception as e:
             logger.error(f"登录失败: {e}")
-            return f"登录失败：{str(e)}"
+            return self._error(f"登录失败：{str(e)}")
     
     @kernel_function(
         description="登出禅道系统",
         name="logout"
     )
-    def logout(self) -> str:
+    def logout(self) -> dict[str, Any]:
         """登出禅道系统
         
         Returns:
-            登出结果信息
+            登出结果
         """
         try:
             if self.client and self.current_user:
@@ -149,34 +192,31 @@ class ZenTaoMCPServer:
                 self.current_user = None
                 
                 logger.info(f"用户 {username} 登出成功")
-                return f"用户 {username} 已成功登出"
-            else:
-                return "当前没有用户登录"
+                return self._ok({"account": username}, message="登出成功")
+            return self._error("当前没有用户登录")
                 
         except Exception as e:
             logger.error(f"登出失败: {e}")
-            return f"登出失败：{str(e)}"
+            return self._error(f"登出失败：{str(e)}")
     
     @kernel_function(
         description="获取当前登录用户信息",
         name="get_current_user"
     )
-    def get_current_user(self) -> str:
+    def get_current_user(self) -> dict[str, Any]:
         """获取当前登录用户信息
         
         Returns:
-            当前用户信息的字符串表示
+            当前用户信息
         """
         try:
             if self.current_user:
-                user = self.current_user
-                return f"当前用户：{user.realname}（{user.account}），邮箱：{user.email}，角色：{user.role}"
-            else:
-                return "当前没有用户登录"
+                return self._ok({"user": self._user_summary(self.current_user)})
+            return self._error("当前没有用户登录")
                 
         except Exception as e:
             logger.error(f"获取用户信息失败: {e}")
-            return f"获取用户信息失败：{str(e)}"
+            return self._error(f"获取用户信息失败：{str(e)}")
     
     # ===============================
     # 缺陷管理函数
@@ -191,7 +231,7 @@ class ZenTaoMCPServer:
         limit: int = 0,
         status: str = "all",
         sort_order: str = "latest"
-    ) -> str:
+    ) -> dict[str, Any]:
         """查询缺陷清单
         
         Args:
@@ -207,7 +247,7 @@ class ZenTaoMCPServer:
                        - "priority": 优先级排序
             
         Returns:
-            缺陷清单的格式化字符串
+            缺陷清单
         """
         try:
             self._ensure_logged_in()
@@ -215,8 +255,6 @@ class ZenTaoMCPServer:
             
             # 根据状态参数确定查询参数
             status_param = None if status == "all" else status
-            
-            # 使用常量配置的排序映射
             sort_key = BUG_SORT_KEY_MAPPING.get(sort_order, "id_desc")
             
             # 获取缺陷列表
@@ -239,42 +277,51 @@ class ZenTaoMCPServer:
                 )
             
             if not bugs:
-                status_text = "所有状态" if status == "all" else f"状态为'{status}'"
-                return f"未找到{status_text}的缺陷"
-            
-            # 格式化输出
-            result = f"缺陷清单（共 {len(bugs)} 个）\n"
-            result += SECTION_SEPARATOR + "\n"
-            
-            for i, bug in enumerate(bugs, 1):
-                # 使用模型的显示方法
-                result += f"🏷️ {i}. **[{bug.id}]**: {bug.title}\n"
-                result += f"📅 创建时间: {bug.openedDate}\n"
-                result += f"🎯 级别: {bug.get_severity_display()}\n"
-                result += f"⭐ 优先级: {bug.get_priority_display_with_emoji()}\n"
-                result += f"👤 指派给: {bug.assignedTo or '未指派'}\n"
-                result += f"👨‍💻 解决: {bug.resolvedBy or ''}\n"
-                result += f"🔧 方案: {bug.get_resolution_display()}\n"
-                result += f" {ITEM_SEPARATOR}\n"
-            
-            return result
+                return self._ok(
+                    {"items": [], "total": 0},
+                    message=f"未找到{self._status_text(status, '缺陷')}的缺陷",
+                )
+
+            items = [
+                {
+                    "id": bug.id,
+                    "title": bug.title,
+                    "opened_date": bug.openedDate,
+                    "severity": bug.severity,
+                    "priority": bug.pri,
+                    "status": bug.status,
+                    "assigned_to": bug.assignedTo,
+                    "resolved_by": bug.resolvedBy,
+                    "resolution": bug.resolution,
+                }
+                for bug in bugs
+            ]
+
+            return self._ok(
+                {
+                    "items": items,
+                    "total": len(items),
+                    "page": 1,
+                    "per_page": DEFAULT_PAGE_SIZE,
+                }
+            )
             
         except Exception as e:
             logger.error(f"查询缺陷清单失败: {e}")
-            return f"查询缺陷清单失败：{str(e)}"
+            return self._error(f"查询缺陷清单失败：{str(e)}")
     
     @kernel_function(
         description="查询指定缺陷的详细信息，包含基本信息、重现步骤、附件和历史记录",
         name="query_bug_detail"
     )
-    def query_bug_detail(self, bug_id: int):
+    def query_bug_detail(self, bug_id: int) -> dict[str, Any]:
         """查询指定缺陷的详细信息
         
         Args:
             bug_id: 缺陷ID
             
         Returns:
-            缺陷的详细信息
+            缺陷详细信息
         """
         try:
             self._ensure_logged_in()
@@ -284,227 +331,64 @@ class ZenTaoMCPServer:
             bug_detail_response = client.bugs.get_bug_detail(bug_id)
             
             if not bug_detail_response:
-                return ChatMessageContent(role="tool", items=[TextContent(text=f"❌ 未找到ID为 {bug_id} 的缺陷")])
+                return self._error(f"未找到ID为 {bug_id} 的缺陷")
             
             # 解析详细数据
             bug_detail_data = bug_detail_response.get_bug_detail_data()
             bug = bug_detail_data.bug
-            
-            # 存储找到的图片、附件和相关信息
-            image_urls, file_urls = [], []
-            image_counter = 0
-            
-            # 构建详细信息
-            result = f"缺陷详细信息 - #{bug.id}\n"
-            result += SECTION_SEPARATOR + "\n"
-            result += f"📋 标题: {bug.title}\n\n"
-            
-            # ===============================
-            # 基本信息部分
-            # ===============================
-            result += "## 📊 基本信息\n"
-            result += SUBSECTION_SEPARATOR + "\n"
-            
-            # 使用模型的显示方法，避免重复维护映射
-            status_text = bug.get_status_display_with_emoji()
-            severity_text = bug.get_severity_display_with_emoji()
-            priority_text = bug.get_priority_display_with_emoji()
-            type_text = bug.get_type_display()
-            resolution_text = bug.get_resolution_display()
-            
-            # 获取产品名称
-            product_name = bug_detail_data.products.get(bug.product, f"产品ID-{bug.product}") if bug.product else "未指定"
-            
-            # 获取模块路径
-            module_path = " > ".join([m.get("name", "") for m in bug_detail_data.modulePath if m.get("name")]) if bug_detail_data.modulePath else "未指定"
-            
-            # 用户名映射 - 统一的用户名获取逻辑
-            def get_user_name(username: str) -> str:
-                if not username:
-                    return "未指定"
-                return bug_detail_data.users.get(username, username)
-            
-            result += f"🏷️ 所属产品: {product_name}\n"
-            result += f"📂 所属模块: {module_path}\n"
-            result += f"📊 状态: {status_text}\n"
-            result += f"🎯 严重程度: {severity_text}\n"
-            result += f"⭐ 优先级: {priority_text}\n"
-            result += f"🔧 Bug类型: {type_text}\n"
-            if resolution_text:
-                result += f"✅ 解决方案: {resolution_text}\n"
-            result += f"👤 当前指派: {get_user_name(bug.assignedTo)}\n"
-            result += f"👨‍💻 创建者: {get_user_name(bug.openedBy)}\n"
-            result += f"📅 创建时间: {bug.openedDate or '未知'}\n"
-            result += f"🔄 激活次数: {bug.activatedCount or 0}\n"
-            result += f"✅ 确认状态: {'已确认' if bug.confirmed == '1' else '未确认'}\n"
-            
-            if bug.os:
-                result += f"💻 操作系统: {bug.os}\n"
-            if bug.assignedDate:
-                result += f"⏰ 指派时间: {bug.assignedDate}\n"
-                
-            result += "\n"
-            
-            # ===============================
-            # 重现步骤部分
-            # ===============================
-            result += "## 🔄 重现步骤\n"
-            result += SUBSECTION_SEPARATOR + "\n"
-            
-            if bug.steps:
-                html_content = bug.steps
-                
-                # 处理图片标签，标记并收集URI
-                zentao_base_url = client.base_url
-                
-                def image_replacer(match):
-                    nonlocal image_counter, image_urls
-                    
-                    # 提取图片路径
-                    img_path = match.group(1)
-                    full_url = f"{zentao_base_url}{img_path}"
-                    
-                    # 提取文件名
-                    filename = img_path.split('/')[-1] if '/' in img_path else img_path
-                    
-                    image_counter += 1
-                    image_placeholder = f"![{filename}]({full_url})"
-                    
-                    # 记录图片信息
-                    image_urls.append({
-                        'url': full_url,
-                        'filename': filename,
-                        'placeholder': image_placeholder
-                    })
-                    
-                    return image_placeholder
-                
-                # 先处理以/zentao/开头的相对路径图片
-                html_content = re.sub(
-                    r'<img[^>]*src="/zentao/([^"]*)"[^>]*>', 
-                    image_replacer, 
-                    html_content
-                )
-                
-                # 使用BugDetailData的静态方法清理HTML内容
-                from mcp_zentao.models.bug import BugDetailData
-                cleaned_steps = BugDetailData._clean_html_content(html_content)
-                
-                # 分割为行并添加到输出
-                for line in cleaned_steps.split("\n"):
-                    line = line.strip()
-                    if line:
-                        result += f"{line}\n"
-            else:
-                result += "暂无重现步骤描述\n"
-            result += "\n"
-            
-            # ===============================
-            # 附件部分
-            # ===============================
-            if bug.files:
-                result += "## 📎 附件信息\n"
-                result += SUBSECTION_SEPARATOR + "\n"
-                
-                zentao_base_url = client.base_url
-                session_id = client.session_id or ""
-                
-                for file_id, file_info in bug.files.items():
-                    # 收集附件信息
-                    file_urls.append({
-                        'id': file_id,
-                        'url': f"{zentao_base_url}file-download-{file_id}.html?zentaosid={session_id}",
-                        'title': file_info.get("title", "未知文件"),
-                        'filename': file_info.get("pathname", "未知文件"),
-                        'extension': file_info.get("extension", "").lower(),
-                        'mime_type': mimetypes.guess_type(file_info.get("title", "file.bin"))[0] or "application/octet-stream",
-                        'size': file_info.get("size", "0")
-                    })
+            users = bug_detail_data.users
 
-                    size = int(file_info.get("size", "0"))
-                    size_kb = round(size / 1024, 2)
+            def resolve_user(account: str | None) -> str | None:
+                if not account:
+                    return None
+                return users.get(account, account)
 
-                    result += f"📎 {file_urls[-1]['title']}\n"
-                    result += f"   💾 大小: {size_kb}KB\n"
-                    result += f"   📎 类型: {file_urls[-1]['mime_type']}\n"
-                    result += f"   🔗 下载: {file_urls[-1]['url']}\n\n"
-            
-            # ===============================
-            # 历史记录部分  
-            # ===============================
-            if bug_detail_data.actions:
-                result += "## 📋 历史记录\n"
-                result += SUBSECTION_SEPARATOR + "\n"
-                
-                # 按日期排序操作历史
-                sorted_actions = sorted(
-                    bug_detail_data.actions.items(), 
-                    key=lambda x: x[1].date, 
-                    reverse=True
-                )
-                
-                # 只显示最近的几条记录，避免过长 - 使用常量
-                recent_actions = sorted_actions[:MAX_HISTORY_RECORDS]
-                
-                for action_id, action in recent_actions:
-                    date = action.date or '未知时间'
-                    
-                    # 使用枚举的显示方法获取图标和中文显示
-                    result += f"{action.action.emoji} {date} - " \
-                        f"{get_user_name(action.actor)} {str(action.action)} {action.extra and get_user_name(action.extra)}\n"
+            data = {
+                "bug": {
+                    "id": bug.id,
+                    "title": bug.title,
+                    "status": bug.status,
+                    "severity": bug.severity,
+                    "priority": bug.pri,
+                    "type": bug.type,
+                    "resolution": bug.resolution,
+                    "assigned_to": resolve_user(bug.assignedTo),
+                    "opened_by": resolve_user(bug.openedBy),
+                    "opened_date": bug.openedDate,
+                    "confirmed": bug.confirmed,
+                },
+                "product": {
+                    "id": bug.product,
+                    "name": bug_detail_data.products.get(
+                        bug.product, f"产品ID-{bug.product}"
+                    )
+                    if bug.product
+                    else None,
+                },
+                "module_path": [
+                    module.get("name", "")
+                    for module in bug_detail_data.modulePath
+                    if module.get("name")
+                ],
+                "steps": bug.steps,
+                "files": bug.files,
+                "actions": [
+                    {
+                        "id": action_id,
+                        "actor": resolve_user(action.actor),
+                        "action": str(action.action),
+                        "date": action.date,
+                        "comment": action.comment,
+                    }
+                    for action_id, action in bug_detail_data.actions.items()
+                ],
+            }
 
-                    # 显示历史变更
-                    if action.history:
-                        for change in action.history:
-                            if change.field == "resolution":
-                                result += f"   🔄 解决方案: {str(BugResolution(change.new))}\n"
-                            if change.field == "resolvedDate":
-                                result += f"   🔄 解决时间: {change.new}\n"
-                            if change.field == "resolvedBy":
-                                result += f"   🔄 解决人: {get_user_name(change.new)}\n"
-                        result += "\n"
-                    if action.comment:
-                        # 清理评论中的HTML
-                        clean_comment = re.sub(r'<[^>]+>', '', action.comment).strip()
-                        if clean_comment:
-                            result += f"   💭 评论: {clean_comment}\n"
-                    result += "\n"
-                
-                if len(sorted_actions) > MAX_HISTORY_RECORDS:
-                    result += f"... 还有 {len(sorted_actions) - MAX_HISTORY_RECORDS} 条历史记录\n\n"
-            
-            # ===============================
-            # 构建多模态返回结果
-            # ===============================
-            contents = [TextContent(text=result)]
-            
-            # 添加收集到的图片内容
-            for img_info in image_urls:
-                try:
-                    contents.append(ImageContent(uri=img_info['url']))
-                    logger.info(f"添加图片: {img_info['filename']}")
-                except Exception as e:
-                    logger.warning(f"无法加载图片 {img_info['filename']}: {e}")
-                    # 如果图片加载失败，在文本中添加说明
-                    error_note = f"\n⚠️ 图片加载失败: {img_info['filename']}\n"
-                    contents.append(TextContent(text=contents[0].text + error_note))
-
-            # 添加收集到的附件内容
-            for file_info in file_urls:
-                try:
-                    contents.append(BinaryContent(uri=file_info['url'], mime_type=file_info['mime_type']))
-                    logger.info(f"添加文件附件: {file_info['filename']}")
-                except Exception as e:
-                    logger.warning(f"无法处理附件 {file_info['filename']}: {e}")
-                    # 如果附件处理失败，在文本中添加说明
-                    error_note = f"\n⚠️ 附件处理失败: {file_info['filename']}\n"
-                    contents.append(TextContent(text=contents[0].text + error_note))
-
-            return ChatMessageContent(role="tool", items=contents)
+            return self._ok(data)
             
         except Exception as e:
             logger.error(f"查询缺陷详情失败: {e}")
-            return ChatMessageContent(role="tool", items=[TextContent(text=f"查询缺陷详情失败：{str(e)}")])
+            return self._error(f"查询缺陷详情失败：{str(e)}")
     
     # ===============================
     # 任务管理函数
@@ -519,7 +403,7 @@ class ZenTaoMCPServer:
         limit: int = 0,
         status: str = "all",
         sort_order: str = "latest"
-    ) -> str:
+    ) -> dict[str, Any]:
         """查询任务清单
         
         Args:
@@ -536,7 +420,7 @@ class ZenTaoMCPServer:
                        - "deadline": 按截止时间排序
             
         Returns:
-            任务清单的格式化字符串
+            任务清单
         """
         try:
             self._ensure_logged_in()
@@ -544,8 +428,6 @@ class ZenTaoMCPServer:
             
             # 根据状态参数确定查询参数
             status_param = None if status == "all" else status
-            
-            # 使用常量配置的排序映射
             sort_key = TASK_SORT_KEY_MAPPING.get(sort_order, "id_desc")
             
             # 获取任务列表
@@ -568,50 +450,51 @@ class ZenTaoMCPServer:
                 )
             
             if not tasks:
-                status_text = "所有状态" if status == "all" else f"状态为'{status}'"
-                return f"未找到{status_text}的任务"
-            
-            # 格式化输出
-            result = f"任务清单（共 {len(tasks)} 个）\n"
-            result += SECTION_SEPARATOR + "\n"
-            
-            for i, task in enumerate(tasks, 1):
-                # 使用模型的显示方法，避免硬编码映射
-                status_text = task.get_status_display_with_emoji()
-                pri_text = task.get_priority_display_with_emoji()
-                
-                result += f"{i:3d}. [{task.id:>6}] {task.name}\n"
-                result += f"     状态: {status_text:<15} | 优先级: {pri_text:<15}\n"
-                result += f"     项目: {task.project or '未指定':<20} | 指派给: {task.assignedTo or '未指派'}\n"
-                
-                # 工时信息
-                estimate = f"{task.estimate}h" if task.estimate else "未估算"
-                consumed = f"{task.consumed}h" if task.consumed else "0h"
-                result += f"     预估: {estimate:<8} | 已用: {consumed:<8}"
-                
-                if task.deadline:
-                    result += f" | 截止: {task.deadline}"
-                result += "\n"
-                result += f"     {ITEM_SEPARATOR}\n"
-            
-            return result
+                return self._ok(
+                    {"items": [], "total": 0},
+                    message=f"未找到{self._status_text(status, '任务')}的任务",
+                )
+
+            items = [
+                {
+                    "id": task.id,
+                    "name": task.name,
+                    "status": task.status,
+                    "priority": task.pri,
+                    "project": task.project,
+                    "assigned_to": task.assignedTo,
+                    "opened_by": task.openedBy,
+                    "opened_date": task.openedDate,
+                    "deadline": task.deadline,
+                }
+                for task in tasks
+            ]
+
+            return self._ok(
+                {
+                    "items": items,
+                    "total": len(items),
+                    "page": 1,
+                    "per_page": DEFAULT_PAGE_SIZE,
+                }
+            )
             
         except Exception as e:
             logger.error(f"查询任务清单失败: {e}")
-            return f"查询任务清单失败：{str(e)}"
+            return self._error(f"查询任务清单失败：{str(e)}")
     
     @kernel_function(
         description="查询指定任务的详细信息",
         name="query_task_detail"
     )
-    def query_task_detail(self, task_id: int) -> str:
+    def query_task_detail(self, task_id: int) -> dict[str, Any]:
         """查询指定任务的详细信息
         
         Args:
             task_id: 任务ID
             
         Returns:
-            任务的详细信息
+            任务详细信息
         """
         try:
             self._ensure_logged_in()
@@ -620,55 +503,31 @@ class ZenTaoMCPServer:
             task = client.tasks.get_task_by_id(task_id)
             
             if not task:
-                return f"❌ 未找到ID为 {task_id} 的任务"
-            
-            # 使用模型的显示方法，避免硬编码映射
-            status_text = task.get_status_display_with_emoji()
-            pri_text = task.get_priority_display_with_emoji()
-            
-            result = f"任务详细信息 - #{task.id}\n"
-            result += SECTION_SEPARATOR + "\n"
-            result += f"📋 任务名称: {task.name}\n"
-            result += f"📊 状态: {status_text}\n"
-            result += f"🎯 优先级: {pri_text}\n"
-            result += f"🏗️ 所属项目: {task.project or '未指定'}\n"
-            result += f"👤 指派给: {task.assignedTo or '未指派'}\n"
-            result += f"👨‍💻 创建者: {task.openedBy or '未知'}\n"
-            
-            # 时间信息
-            if task.openedDate:
-                result += f"📅 创建时间: {task.openedDate}\n"
-            if task.deadline:
-                result += f"⏰ 截止时间: {task.deadline}\n"
-            if task.finishedDate and task.finishedDate != "0000-00-00 00:00:00" and task.status in ["done", "closed"]:
-                result += f"✅ 完成时间: {task.finishedDate}\n"
-            
-            # 工时信息
-            result += f"\n⏱️ 工时信息:\n"
-            result += f"   预估工时: {task.estimate or 0} 小时\n"
-            result += f"   已用工时: {task.consumed or 0} 小时\n"
-            
-            try:
-                estimate_hours = float(task.estimate or 0)
-                consumed_hours = float(task.consumed or 0)
-                if estimate_hours > 0:
-                    remaining = max(0, estimate_hours - consumed_hours)
-                    result += f"   剩余工时: {remaining} 小时\n"
-                    progress = min(100, consumed_hours / estimate_hours * 100)
-                    result += f"   完成进度: {progress:.1f}%\n"
-            except (ValueError, TypeError):
-                # 如果转换失败，跳过计算
-                pass
-                
-            result += "\n📝 详细描述:\n"
-            result += SUBSECTION_SEPARATOR + "\n"
-            result += f"{task.desc or '无详细描述'}\n"
-            
-            return result
+                return self._error(f"未找到ID为 {task_id} 的任务")
+
+            data = {
+                "task": {
+                    "id": task.id,
+                    "name": task.name,
+                    "status": task.status,
+                    "priority": task.pri,
+                    "project": task.project,
+                    "assigned_to": task.assignedTo,
+                    "opened_by": task.openedBy,
+                    "opened_date": task.openedDate,
+                    "deadline": task.deadline,
+                    "finished_date": task.finishedDate,
+                    "estimate": task.estimate,
+                    "consumed": task.consumed,
+                    "desc": task.desc,
+                }
+            }
+
+            return self._ok(data)
             
         except Exception as e:
             logger.error(f"查询任务详情失败: {e}")
-            return f"查询任务详情失败：{str(e)}"
+            return self._error(f"查询任务详情失败：{str(e)}")
     
     # ===============================
     # 项目管理函数
@@ -766,36 +625,40 @@ def create_server(base_url: str, timeout: float = 30.0) -> ZenTaoMCPServer:
 
 
 def run(
-    transport: Literal["sse", "stdio"] = "stdio", 
-    port: Optional[int] = None,
-    base_url: str = None,
-    timeout: float = 30.0
+    transport: str = "stdio",
+    port: int | None = None,
+    base_url: str | None = None,
+    timeout: float = 30.0,
 ) -> None:
     """运行禅道 MCP 服务器
     
     Args:
         transport: 传输协议，支持 "sse" 或 "stdio"
         port: SSE 服务器端口（仅在 transport="sse" 时使用）
-        base_url: 禅道服务器基础URL，如果未提供则从环境变量ZENTAO_HOST读取
+        base_url: 禅道服务器基础URL，如果未提供则从环境变量ZENTAO_URL读取
         timeout: 请求超时时间
         auto_login: 是否在启动时自动登录（从环境变量读取用户名密码）
     """
+    from dotenv import load_dotenv
+
     # 加载环境变量
     load_dotenv()
     
     # 从环境变量获取配置
+    import os
+
     if base_url is None:
-        base_url = os.getenv("ZENTAO_HOST")
+        base_url = os.getenv("ZENTAO_URL", '')
         if not base_url:
-            logger.error("未提供base_url参数，且环境变量ZENTAO_HOST也未设置")
-            raise ValueError("必须提供base_url参数或设置环境变量ZENTAO_HOST")
+            logger.error("必须设置环境变量ZENTAO_URL")
+            raise ValueError
     
     # 创建禅道 MCP 服务器
     zentao_server = create_server(base_url=base_url, timeout=timeout)
     
     # 尝试自动登录
-    username = os.getenv("ZENTAO_ACCOUNT")
-    password = os.getenv("ZENTAO_PASSWORD")
+    username = os.getenv("ZENTAO_ACCOUNT", '')
+    password = os.getenv("ZENTAO_PASSWORD", '')
     
     if username and password:
         try:
@@ -885,7 +748,7 @@ def main() -> None:
     parser.add_argument(
         "--base-url",
         type=str,
-        help="禅道服务器基础URL（如未提供将从环境变量ZENTAO_HOST读取）"
+        help="禅道服务器基础URL（如未提供将从环境变量ZENTAO_URL读取）"
     )
     parser.add_argument(
         "--timeout",
@@ -901,14 +764,14 @@ def main() -> None:
             transport=args.transport,
             port=args.port if args.transport == "sse" else None,
             base_url=args.base_url,
-            timeout=args.timeout
+            timeout=args.timeout,
         )
     except KeyboardInterrupt:
         logger.info("服务器已停止")
-        sys.exit(0)
+        raise SystemExit(0)
     except Exception as e:
         logger.error(f"服务器启动失败: {e}")
-        sys.exit(1)
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

@@ -255,12 +255,26 @@ class TaskModel(BaseModel):
         }
 
 
+class TaskListItem(BaseModel):
+    """任务列表项（简化版）"""
+
+    id: str = Field(description="任务ID")
+    name: str = Field(description="任务名称")
+    status: str | TaskStatus | None = Field(default=None, description="任务状态")
+    pri: int | str | None = Field(default=None, description="优先级")
+    assignedTo: str | None = Field(default=None, description="指派人")
+    openedBy: str | None = Field(default=None, description="创建人")
+    openedDate: str | None = Field(default=None, description="创建时间")
+    deadline: str | None = Field(default=None, description="截止时间")
+
+
 class TaskListData(BaseModel):
     """任务列表数据结构"""
-    tasks: List[TaskModel] = Field(description="任务列表")
-    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
+    tasks: List[TaskListItem] = Field(description="任务列表")
+    users: Dict[str, str] = Field(default_factory=dict, description="用户列表映射")
+    pager: Dict[str, Any] | None = Field(default=None, description="分页信息")
     
-    def get_task_list(self) -> List[TaskModel]:
+    def get_task_list(self) -> List[TaskListItem]:
         """获取任务列表"""
         return self.tasks
 

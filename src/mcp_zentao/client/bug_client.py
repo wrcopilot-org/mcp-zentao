@@ -8,7 +8,8 @@ from typing import List, Optional
 from .base_client import BaseClient
 from ..models.bug import (
     BugListResponse, BugModel, BugCreateRequest, BugEditRequest,
-    BugResolveRequest, BugAssignRequest, BugConfirmRequest, BugDetailResponse
+    BugResolveRequest, BugAssignRequest, BugConfirmRequest, BugDetailResponse,
+    BugListItem
 )
 from ..models.common import CommonOperationResponse
 
@@ -25,7 +26,7 @@ class BugClient(BaseClient):
         page: int = 1,
         per_page: int = 20,
         sort_key: str = "id_desc"
-    ) -> List[BugModel]:
+    ) -> List[BugListItem]:
         """获取我的缺陷列表
         
         Args:
@@ -64,7 +65,7 @@ class BugClient(BaseClient):
         per_page: int = 20,
         sort_key: str = "id_desc",
         max_pages: Optional[int] = None
-    ) -> List[BugModel]:
+    ) -> List[BugListItem]:
         """获取我的缺陷列表（所有页面）
         
         Args:

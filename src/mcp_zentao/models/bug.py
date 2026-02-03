@@ -200,6 +200,7 @@ class BugResolution(str, Enum):
     DUPLICATE = "duplicate"        # 重复Bug
     EXTERNAL = "external"          # 外部原因
     NOTREPRO = "notrepro"          # 无法重现
+    NONPROBLEM = "nonproblem"      # 非问题
     
     def __str__(self) -> str:
         """返回中文描述"""
@@ -210,7 +211,8 @@ class BugResolution(str, Enum):
             "bydesign": "设计如此",
             "duplicate": "重复Bug",
             "external": "外部原因",
-            "notrepro": "无法重现"
+            "notrepro": "无法重现",
+            "nonproblem": "非问题"
         }.get(self.value, self.value)
     
     def __repr__(self) -> str:
@@ -583,12 +585,29 @@ class BugModel(BaseModel):
         }
 
 
+class BugListItem(BaseModel):
+    """缺陷列表项（简化版）"""
+
+    id: str = Field(description="缺陷ID")
+    title: str = Field(description="缺陷标题")
+    status: str | BugStatus | None = Field(default=None, description="缺陷状态")
+    severity: int | str | None = Field(default=None, description="严重程度")
+    pri: int | str | None = Field(default=None, description="优先级")
+    assignedTo: str | None = Field(default=None, description="指派人")
+    openedBy: str | None = Field(default="", description="创建人")
+    openedDate: str | None = Field(default=None, description="创建时间")
+    resolvedBy: str | None = Field(default="", description="解决者")
+    resolution: str | None = Field(default=None, description="解决方案")
+
+
 class BugListData(BaseModel):
     """缺陷列表数据结构"""
-    bugs: List[BugModel] = Field(description="缺陷列表")
-    users: Dict[str, str] = Field(description="用户列表，用户名到真实姓名的映射")
-    
-    def get_bug_list(self) -> List[BugModel]:
+
+    bugs: List[BugListItem] = Field(description="缺陷列表")
+    users: Dict[str, str] = Field(default_factory=dict, description="用户列表映射")
+    pager: Dict[str, Any] | None = Field(default=None, description="分页信息")
+
+    def get_bug_list(self) -> List[BugListItem]:
         """获取缺陷列表"""
         return self.bugs
 
@@ -604,7 +623,7 @@ class BugListResponse(BaseModel):
         parsed_data = json.loads(self.data)
         return BugListData.model_validate(parsed_data)
     
-    def get_bug_list(self) -> List[BugModel]:
+    def get_bug_list(self) -> List[BugListItem]:
         """获取缺陷列表"""
         bug_data = self.get_bug_data()
         return bug_data.get_bug_list()
