@@ -468,7 +468,7 @@ def append_to_sendmsgbug(columns, bug_rows, filepath):
     return filepath
 
 
-def main():
+def MonitorBugs():
     output_dir = get_app_dir()
     currentbug_path = os.path.join(output_dir, 'currentbug.xlsx')
     nocodebug_path = os.path.join(output_dir, 'nocodebug.xlsx')
@@ -581,5 +581,161 @@ def main():
     print(f"  SVN未关联(非RD): {len(non_rd_bugs)} 条 (不处理)", flush=True)
 
 
+def query_recent_finished_integration_tasks(conn):
+    """Query recently finished integration tasks."""
+    half_month_ago = (datetime.now() - timedelta(days=15)).strftime('%Y-%m-%d %H:%M:%S')
+    task_name_keyword = '%开发集成%'
+
+    sql = """
+    SELECT
+        t.id                AS '任务编号',
+        pj.name             AS '所属项目',
+        t.name              AS '任务名称',
+        t.status            AS '任务状态',
+        assignee.realname   AS '当前负责人',
+        finisher.realname   AS '完成人',
+        t.finishedDate      AS '完成时间',
+        finisher.role       AS '完成人职位'
+    FROM zt_task t
+    LEFT JOIN zt_project pj    ON t.project = pj.id
+    LEFT JOIN zt_user assignee ON t.assignedTo = assignee.account
+    LEFT JOIN zt_user finisher ON t.finishedBy = finisher.account
+    WHERE t.deleted = '0'
+      AND t.finishedDate IS NOT NULL
+      AND t.finishedDate >= %s
+      AND t.name LIKE %s
+    ORDER BY t.finishedDate DESC
+    """
+
+    print("task query sql:", flush=True)
+    print(sql.strip(), flush=True)
+    print(f"task query params: finishedDate>='{half_month_ago}', name like '{task_name_keyword}'", flush=True)
+
+    cursor = conn.cursor()
+    cursor.execute(sql, (half_month_ago, task_name_keyword))
+    columns = [desc[0] for desc in cursor.description]
+    rows = cursor.fetchall()
+    cursor.close()
+    return columns, rows
+
+
+TASK_COL_ID = 0
+TASK_COL_PROJECT = 1
+TASK_COL_NAME = 2
+TASK_COL_ASSIGNEE = 4
+TASK_COL_FINISHER = 5
+TASK_COL_FINISHED_DATE = 6
+
+
+def send_task_dingtalk_message(task_rows, dingtalk_map):
+    """Send DingTalk reminders to task finishers."""
+    if not task_rows:
+        return []
+
+    finisher_tasks = {}
+    for row in task_rows:
+        finisher = str(row[TASK_COL_FINISHER] or '').strip()
+        if not finisher:
+            continue
+        finisher_tasks.setdefault(finisher, []).append(row)
+
+    sent_tasks = []
+    for finisher, tasks in finisher_tasks.items():
+        dingtalk_id = dingtalk_map.get(finisher, '')
+        if not dingtalk_id:
+            print(f"  [warn] missing dingtalk id for finisher: {finisher}", flush=True)
+            continue
+
+        task_lines = []
+        for row in tasks:
+            task_id = row[TASK_COL_ID]
+            project = row[TASK_COL_PROJECT] or ''
+            task_name = row[TASK_COL_NAME] or ''
+            assignee = row[TASK_COL_ASSIGNEE] or ''
+            finished_date = str(row[TASK_COL_FINISHED_DATE] or '')
+            task_lines.append(
+                f"  - Task#{task_id} [{project}] {task_name} (负责人: {assignee}, 完成时间: {finished_date})"
+            )
+
+        text = (
+            f"提测邮件：@{finisher} 完成以下“开发集成”任务，请及时发送提测邮件。\n\n"
+            + "\n".join(task_lines)
+        )
+
+        payload = {
+            "msgtype": "text",
+            "text": {"content": text},
+            "at": {
+                "atMobiles": [dingtalk_id],
+                "isAtAll": False
+            }
+        }
+
+        try:
+            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            signed_url = get_dingtalk_signed_url()
+            req = urllib.request.Request(
+                signed_url,
+                data=data,
+                headers={'Content-Type': 'application/json'}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+                if result.get('errcode') == 0:
+                    print(f"  task reminder sent -> {finisher} ({len(tasks)} tasks)", flush=True)
+                    sent_tasks.extend(tasks)
+                else:
+                    print(f"  task reminder failed -> {finisher}: {result.get('errmsg')}", flush=True)
+        except Exception as e:
+            print(f"  task reminder exception -> {finisher}: {e}", flush=True)
+
+    return sent_tasks
+
+
+def MonitorTasks():
+    output_dir = get_app_dir()
+    currenttask_path = os.path.join(output_dir, 'currenttask.xlsx')
+    sendmsgtask_path = os.path.join(output_dir, 'sendmsgtask.xlsx')
+
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("Task monitor: recently finished integration tasks", flush=True)
+    print("=" * 60, flush=True)
+
+    conn = get_db_connection()
+    try:
+        columns, rows = query_recent_finished_integration_tasks(conn)
+        print(f"queried tasks: {len(rows)}", flush=True)
+    finally:
+        conn.close()
+
+    if not rows:
+        print("no recently finished integration tasks", flush=True)
+        return
+
+    sent_ids = load_sent_bug_ids(sendmsgtask_path)
+    if sent_ids:
+        print(f"already reminded tasks: {len(sent_ids)}", flush=True)
+
+    rows = [row for row in rows if int(row[TASK_COL_ID]) not in sent_ids]
+    if not rows:
+        print("no new tasks after excluding previously reminded tasks", flush=True)
+        return
+
+    generate_excel(columns[:-1], [row[:-1] for row in rows], currenttask_path)
+    print(f"saved current tasks: {currenttask_path}", flush=True)
+
+    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
+    dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
+    if dingtalk_map:
+        print(f"loaded dingtalk members: {len(dingtalk_map)}", flush=True)
+
+    sent_tasks = send_task_dingtalk_message(rows, dingtalk_map)
+    if sent_tasks:
+        append_to_sendmsgbug(columns, sent_tasks, sendmsgtask_path)
+        print(f"saved sent task reminders: {sendmsgtask_path}", flush=True)
+
+
 if __name__ == '__main__':
-    main()
+    MonitorBugs()
+    MonitorTasks()
