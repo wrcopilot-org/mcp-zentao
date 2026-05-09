@@ -736,6 +736,387 @@ def MonitorTasks():
         print(f"saved sent task reminders: {sendmsgtask_path}", flush=True)
 
 
+def load_sent_record_time_map(filepath, id_col=1, sent_time_col=None):
+    """Load last sent time map from an excel file."""
+    sent_time_map = {}
+    if not os.path.exists(filepath):
+        return sent_time_map
+
+    try:
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        last_col = sent_time_col or ws.max_column
+        for row_idx in range(2, ws.max_row + 1):
+            item_id = ws.cell(row=row_idx, column=id_col).value
+            sent_time_value = ws.cell(row=row_idx, column=last_col).value
+            if not item_id or not sent_time_value:
+                continue
+
+            try:
+                item_id = int(item_id)
+            except (TypeError, ValueError):
+                continue
+
+            if isinstance(sent_time_value, datetime):
+                sent_time = sent_time_value
+            else:
+                try:
+                    sent_time = datetime.strptime(str(sent_time_value), '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    continue
+
+            prev_time = sent_time_map.get(item_id)
+            if prev_time is None or sent_time > prev_time:
+                sent_time_map[item_id] = sent_time
+        wb.close()
+    except Exception as e:
+        print(f"  [warn] failed to load send record time map: {e}", flush=True)
+
+    return sent_time_map
+
+
+def query_delayed_waiting_tasks(conn):
+    """Query tasks whose estimated start date is overdue by more than one day and still waiting."""
+    one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    one_day_ago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    sql = """
+    SELECT
+        t.id                AS '任务编号',
+        pj.name             AS '所属项目',
+        t.name              AS '任务名称',
+        t.status            AS '任务状态',
+        assignee.realname   AS '负责人',
+        t.estStarted        AS '预计开始时间',
+        t.deadline          AS '截止日期',
+        t.assignedDate      AS '指派时间',
+        assignee.account    AS '负责人账号'
+    FROM zt_task t
+    LEFT JOIN zt_project pj    ON t.project = pj.id
+    LEFT JOIN zt_user assignee ON t.assignedTo = assignee.account
+    WHERE t.deleted = '0'
+      AND t.status = 'wait'
+      AND t.estStarted IS NOT NULL
+      AND t.estStarted <> '0000-00-00'
+      AND t.estStarted >= %s
+      AND t.estStarted < %s
+    ORDER BY t.estStarted ASC, t.id ASC
+    """
+
+    print("delay task query sql:", flush=True)
+    print(sql.strip(), flush=True)
+    print(
+        f"delay task query params: estStarted>='{one_month_ago}', estStarted<'{one_day_ago}', status='wait'",
+        flush=True
+    )
+
+    cursor = conn.cursor()
+    cursor.execute(sql, (one_month_ago, one_day_ago))
+    columns = [desc[0] for desc in cursor.description]
+    rows = cursor.fetchall()
+    cursor.close()
+    return columns, rows
+
+
+DELAY_TASK_COL_ID = 0
+DELAY_TASK_COL_PROJECT = 1
+DELAY_TASK_COL_NAME = 2
+DELAY_TASK_COL_STATUS = 3
+DELAY_TASK_COL_ASSIGNEE = 4
+DELAY_TASK_COL_EST_STARTED = 5
+DELAY_TASK_COL_DEADLINE = 6
+
+
+def filter_delay_tasks_by_remind_interval(task_rows, last_sent_time_map, interval_days=2):
+    """Keep only tasks that have never been reminded or were reminded before the interval."""
+    now = datetime.now()
+    interval = timedelta(days=interval_days)
+    filtered_rows = []
+    skipped_rows = []
+
+    for row in task_rows:
+        task_id = int(row[DELAY_TASK_COL_ID])
+        last_sent_time = last_sent_time_map.get(task_id)
+        if last_sent_time and now - last_sent_time < interval:
+            skipped_rows.append(row)
+            continue
+        filtered_rows.append(row)
+
+    return filtered_rows, skipped_rows
+
+
+def send_delay_task_dingtalk_message(task_rows, dingtalk_map):
+    """Send DingTalk reminders for delayed waiting tasks."""
+    if not task_rows:
+        return []
+
+    assignee_tasks = {}
+    for row in task_rows:
+        assignee = str(row[DELAY_TASK_COL_ASSIGNEE] or '').strip()
+        if not assignee:
+            continue
+        assignee_tasks.setdefault(assignee, []).append(row)
+
+    sent_tasks = []
+    for assignee, tasks in assignee_tasks.items():
+        dingtalk_id = dingtalk_map.get(assignee, '')
+        if not dingtalk_id:
+            print(f"  [warn] missing dingtalk id for assignee: {assignee}", flush=True)
+            continue
+
+        task_lines = []
+        for row in tasks:
+            task_id = row[DELAY_TASK_COL_ID]
+            project = row[DELAY_TASK_COL_PROJECT] or ''
+            task_name = row[DELAY_TASK_COL_NAME] or ''
+            est_started = str(row[DELAY_TASK_COL_EST_STARTED] or '')
+            deadline = str(row[DELAY_TASK_COL_DEADLINE] or '')
+            task_lines.append(
+                f"  - Task#{task_id} [{project}] {task_name} (预计开始: {est_started}, 截止日期: {deadline})"
+            )
+
+        text = (
+            f"任务延迟：@{assignee} 以下任务已超过预计开始时间且状态仍为wait，请及时更新任务状态。\n\n"
+            + "\n".join(task_lines)
+        )
+
+        payload = {
+            "msgtype": "text",
+            "text": {"content": text},
+            "at": {
+                "atMobiles": [dingtalk_id],
+                "isAtAll": False
+            }
+        }
+
+        try:
+            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            signed_url = get_dingtalk_signed_url()
+            req = urllib.request.Request(
+                signed_url,
+                data=data,
+                headers={'Content-Type': 'application/json'}
+            )
+            
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+                if result.get('errcode') == 0:
+                    print(f"  delay task reminder sent -> {assignee} ({len(tasks)} tasks)", flush=True)
+                    sent_tasks.extend(tasks)
+                else:
+                    print(f"  delay task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
+        except Exception as e:
+            print(f"  delay task reminder exception -> {assignee}: {e}", flush=True)
+
+    return sent_tasks
+
+
+def MonitorDelayedTasks():
+    output_dir = get_app_dir()
+    current_delay_task_path = os.path.join(output_dir, 'currentdelaytask.xlsx')
+    sendmsg_delay_task_path = os.path.join(output_dir, 'sendmsgdelaytask.xlsx')
+
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("Task monitor: delayed waiting tasks", flush=True)
+    print("=" * 60, flush=True)
+
+    conn = get_db_connection()
+    try:
+        columns, rows = query_delayed_waiting_tasks(conn)
+        print(f"queried delayed tasks: {len(rows)}", flush=True)
+    finally:
+        conn.close()
+
+    if not rows:
+        print("no delayed waiting tasks", flush=True)
+        return
+
+    last_sent_time_map = load_sent_record_time_map(sendmsg_delay_task_path)
+    if last_sent_time_map:
+        print(f"loaded delayed task send records: {len(last_sent_time_map)}", flush=True)
+
+    rows, skipped_rows = filter_delay_tasks_by_remind_interval(rows, last_sent_time_map, interval_days=2)
+    print(f"delayed tasks to remind: {len(rows)}", flush=True)
+    print(f"delayed tasks skipped by 2-day interval: {len(skipped_rows)}", flush=True)
+    if not rows:
+        print("no delayed tasks need reminding right now", flush=True)
+        return
+
+    generate_excel(columns[:-1], [row[:-1] for row in rows], current_delay_task_path)
+    print(f"saved current delayed tasks: {current_delay_task_path}", flush=True)
+
+    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
+    dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
+    if dingtalk_map:
+        print(f"loaded dingtalk members: {len(dingtalk_map)}", flush=True)
+
+    sent_tasks = send_delay_task_dingtalk_message(rows, dingtalk_map)
+    if sent_tasks:
+        append_to_sendmsgbug(columns, sent_tasks, sendmsg_delay_task_path)
+        print(f"saved delayed task reminders: {sendmsg_delay_task_path}", flush=True)
+
+
+def query_overdue_deadline_tasks(conn):
+    """Query tasks whose deadline is overdue by more than one day, estStarted is within one month, and status is wait/doing."""
+    one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+    one_day_ago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+
+    sql = """
+    SELECT
+        t.id                AS '任务编号',
+        pj.name             AS '所属项目',
+        t.name              AS '任务名称',
+        t.status            AS '任务状态',
+        assignee.realname   AS '负责人',
+        t.estStarted        AS '预计开始时间',
+        t.deadline          AS '截止日期',
+        t.assignedDate      AS '指派时间',
+        assignee.account    AS '负责人账号'
+    FROM zt_task t
+    LEFT JOIN zt_project pj    ON t.project = pj.id
+    LEFT JOIN zt_user assignee ON t.assignedTo = assignee.account
+    WHERE t.deleted = '0'
+      AND t.status IN ('0000', 'doing')
+      AND t.estStarted IS NOT NULL
+      AND t.estStarted <> '0000-00-00'
+      AND t.estStarted >= %s
+      AND t.deadline IS NOT NULL
+      AND t.deadline <> '0000-00-00'
+      AND t.deadline < %s
+    ORDER BY t.deadline ASC, t.id ASC
+    """
+
+    print("deadline task query sql:", flush=True)
+    print(sql.strip(), flush=True)
+    print(
+        f"deadline task query params: estStarted>='{one_month_ago}', deadline<'{one_day_ago}', status in ('wait','doing')",
+        flush=True
+    )
+
+    cursor = conn.cursor()
+    cursor.execute(sql, (one_month_ago, one_day_ago))
+    columns = [desc[0] for desc in cursor.description]
+    rows = cursor.fetchall()
+    cursor.close()
+    return columns, rows
+
+
+def send_deadline_task_dingtalk_message(task_rows, dingtalk_map):
+    """Send DingTalk reminders for overdue deadline tasks."""
+    if not task_rows:
+        return []
+
+    assignee_tasks = {}
+    for row in task_rows:
+        assignee = str(row[DELAY_TASK_COL_ASSIGNEE] or '').strip()
+        if not assignee:
+            continue
+        assignee_tasks.setdefault(assignee, []).append(row)
+
+    sent_tasks = []
+    for assignee, tasks in assignee_tasks.items():
+        dingtalk_id = dingtalk_map.get(assignee, '')
+        if not dingtalk_id:
+            print(f"  [warn] missing dingtalk id for assignee: {assignee}", flush=True)
+            continue
+
+        task_lines = []
+        for row in tasks:
+            task_id = row[DELAY_TASK_COL_ID]
+            project = row[DELAY_TASK_COL_PROJECT] or ''
+            task_name = row[DELAY_TASK_COL_NAME] or ''
+            status = str(row[DELAY_TASK_COL_STATUS] or '')
+            est_started = str(row[DELAY_TASK_COL_EST_STARTED] or '')
+            deadline = str(row[DELAY_TASK_COL_DEADLINE] or '')
+            task_lines.append(
+                f"  - Task#{task_id} [{project}] {task_name} (状态: {status}, 预计开始: {est_started}, 截止日期: {deadline})"
+            )
+
+        text = (
+            f"任务-延迟：@{assignee} 以下任务已超过截止日期，请及时更新任务状态。\n\n"
+            + "\n".join(task_lines)
+        )
+
+        payload = {
+            "msgtype": "text",
+            "text": {"content": text},
+            "at": {
+                "atMobiles": [dingtalk_id],
+                "isAtAll": False
+            }
+        }
+
+        try:
+            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+            signed_url = get_dingtalk_signed_url()
+            req = urllib.request.Request(
+                signed_url,
+                data=data,
+                headers={'Content-Type': 'application/json'}
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                result = json.loads(resp.read().decode('utf-8'))
+                if result.get('errcode') == 0:
+                    print(f"  deadline task reminder sent -> {assignee} ({len(tasks)} tasks)", flush=True)
+                    sent_tasks.extend(tasks)
+                else:
+                    sent_tasks.extend(tasks)
+                    print(f"  deadline task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
+        except Exception as e:
+            print(f"  deadline task reminder exception -> {assignee}: {e}", flush=True)
+
+    return sent_tasks
+
+
+def MonitorDeadlineTasks():
+    output_dir = get_app_dir()
+    current_deadline_task_path = os.path.join(output_dir, 'currentdeadlinetask.xlsx')
+    sendmsg_deadline_task_path = os.path.join(output_dir, 'sendmsgdeadlinetask.xlsx')
+
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("Task monitor: overdue deadline tasks", flush=True)
+    print("=" * 60, flush=True)
+
+    conn = get_db_connection()
+    try:
+        columns, rows = query_overdue_deadline_tasks(conn)
+        print(f"queried overdue deadline tasks: {len(rows)}", flush=True)
+    finally:
+        conn.close()
+
+    if not rows:
+        print("no overdue deadline tasks", flush=True)
+        return
+
+    last_sent_time_map = load_sent_record_time_map(sendmsg_deadline_task_path)
+    if last_sent_time_map:
+        print(f"loaded deadline task send records: {len(last_sent_time_map)}", flush=True)
+
+    rows, skipped_rows = filter_delay_tasks_by_remind_interval(rows, last_sent_time_map, interval_days=2)
+    print(f"deadline tasks to remind: {len(rows)}", flush=True)
+    print(f"deadline tasks skipped by 2-day interval: {len(skipped_rows)}", flush=True)
+    if not rows:
+        print("no overdue deadline tasks need reminding right now", flush=True)
+        return
+
+    generate_excel(columns[:-1], [row[:-1] for row in rows], current_deadline_task_path)
+    print(f"saved current deadline tasks: {current_deadline_task_path}", flush=True)
+
+    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
+    dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
+    if dingtalk_map:
+        print(f"loaded dingtalk members: {len(dingtalk_map)}", flush=True)
+
+    sent_tasks = send_deadline_task_dingtalk_message(rows, dingtalk_map)
+    if sent_tasks:
+        append_to_sendmsgbug(columns, sent_tasks, sendmsg_deadline_task_path)
+        print(f"saved deadline task reminders: {sendmsg_deadline_task_path}", flush=True)
+
+
 if __name__ == '__main__':
     MonitorBugs()
     MonitorTasks()
+    MonitorDelayedTasks()
+    MonitorDeadlineTasks()
