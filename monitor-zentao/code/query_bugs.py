@@ -172,14 +172,33 @@ def generate_excel(columns, rows, output_path):
 # SVN 相关功能
 # ============================================================
 
-SVN_REPOS = [
-    "http://172.17.188.253/svn/diskcopy/01_ProjectArea/_main",
-    "http://172.17.188.253/svn/diskcopy/01_ProjectArea/work",
-    "http://172.17.188.253/svn/epm2/01_ProjectArea/00_Source/_EPM_main",
-    "http://172.17.188.253/svn/epm2/01_ProjectArea/00_Source/_EPM_work",
-    "http://172.17.188.253/svn/Toolkit_Shell/01_Project/00_Source/_main",
-    "http://172.17.188.253/svn/share_lib/99_PublicLibrary",
-]
+def load_svn_repos(filepath):
+    """Load svn repo urls from xlsx config."""
+    if not os.path.exists(filepath):
+        print(f"  [warn] svn repo config not found: {filepath}", flush=True)
+        return []
+
+    repo_urls = []
+    try:
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        for row_idx in range(2, ws.max_row + 1):
+            repo_url = ws.cell(row=row_idx, column=1).value
+            if repo_url:
+                repo_url = str(repo_url).strip()
+                if repo_url:
+                    repo_urls.append(repo_url)
+        wb.close()
+    except Exception as e:
+        print(f"  [warn] failed to load svn repo config: {e}", flush=True)
+        return []
+
+    if not repo_urls:
+        print(f"  [warn] svn repo config is empty: {filepath}", flush=True)
+        return []
+
+    print(f"loaded svn repos from config: {len(repo_urls)}", flush=True)
+    return repo_urls
 
 
 def get_svn_logs(repo_url, days=14):
@@ -473,6 +492,7 @@ def MonitorBugs():
     currentbug_path = os.path.join(output_dir, 'currentbug.xlsx')
     nocodebug_path = os.path.join(output_dir, 'nocodebug.xlsx')
     sendmsgbug_path = os.path.join(output_dir, 'sendmsgbug.xlsx')
+    svn_repo_config_path = os.path.join(output_dir, 'svn_repos.xlsx')
 
     # ---- 第1步：查询数据库，排除已通知的bug ----
     print("=" * 60, flush=True)
@@ -514,8 +534,13 @@ def MonitorBugs():
     print("第2步：查询SVN仓库最近两周的提交记录", flush=True)
     print("=" * 60, flush=True)
 
+    svn_repos = load_svn_repos(svn_repo_config_path)
+    if not svn_repos:
+        print("未配置可用的SVN仓库，程序结束", flush=True)
+        return
+
     all_svn_logs = []
-    for repo_url in SVN_REPOS:
+    for repo_url in svn_repos:
         print(f"  查询: {repo_url}", flush=True)
         logs = get_svn_logs(repo_url, days=14)
         print(f"    获取到 {len(logs)} 条提交记录", flush=True)
