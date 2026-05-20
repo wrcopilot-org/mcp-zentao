@@ -29,6 +29,25 @@ import base64
 
 import sys
 
+# 添加项目根目录到路径，以便导入 dingtalk 模块
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
+try:
+    from dingtalk.dingtalk_client import DingTalkClient
+    _dingtalk_client = None
+
+    def get_dingtalk_client():
+        global _dingtalk_client
+        if _dingtalk_client is None:
+            try:
+                _dingtalk_client = DingTalkClient()
+            except (ValueError, RuntimeError) as e:
+                print(f"  [警告] DingTalkClient初始化失败: {e}", flush=True)
+        return _dingtalk_client
+except ImportError:
+    print("[警告] 无法导入DingTalkClient，将仅使用群机器人发送", flush=True)
+    def get_dingtalk_client():
+        return None
+
 
 def get_app_dir():
     """获取应用所在目录（兼容PyInstaller打包后的exe和普通py运行）"""
@@ -98,7 +117,9 @@ COL_PRODUCT = 1
 COL_PROJECT = 2
 COL_MODULE = 3
 COL_TITLE = 4
+COL_STATUS = 7          # 状态
 COL_ASSIGNEE = 10       # 当前负责人 realname
+COL_ASSIGNED_DATE = 11  # 指派时间
 COL_RESOLVER = 12       # 解决人 realname
 COL_RESOLVED_DATE = 13
 COL_RESOLUTION = 14     # 解决方案
@@ -321,29 +342,69 @@ def get_dingtalk_signed_url():
 
 
 def load_dingtalk_member_map(filepath):
-    """从dingtalk-mem.xlsx加载 {姓名: 钉钉号} 映射"""
+    """从dingtalk-mem.xlsx加载 {姓名: 钉钉号} 映射
+    
+    Excel格式: 列1=姓名, 列2=钉钉号(手机号), 列3=职务
+    返回: (member_map, supervisor_names)
+        member_map: {姓名: 钉钉号}
+        supervisor_names: [主管姓名列表]
+    """
     member_map = {}
+    supervisor_names = []
     if not os.path.exists(filepath):
         print(f"  [警告] 未找到钉钉成员映射文件: {filepath}", flush=True)
-        return member_map
+        return member_map, supervisor_names
     try:
         wb = openpyxl.load_workbook(filepath)
         ws = wb.active
         for row_idx in range(2, ws.max_row + 1):  # 跳过表头
             name = ws.cell(row=row_idx, column=1).value
             dingtalk_id = ws.cell(row=row_idx, column=2).value
+            role = ws.cell(row=row_idx, column=3).value
             if name and dingtalk_id:
-                member_map[str(name).strip()] = str(dingtalk_id).strip()
+                name_str = str(name).strip()
+                member_map[name_str] = str(dingtalk_id).strip()
+                if role and str(role).strip() == '主管':
+                    supervisor_names.append(name_str)
         wb.close()
     except Exception as e:
         print(f"  [警告] 读取dingtalk-mem.xlsx失败: {e}", flush=True)
-    return member_map
+    return member_map, supervisor_names
 
 
-def send_dingtalk_message(bug_rows, dingtalk_map):
-    """向解决人发送钉钉消息，通过钉钉号@指定人，返回发送成功的bug列表"""
+def send_direct_message(user_ids, text):
+    """通过DingTalkClient直接发送消息给用户，成功返回True"""
+    client = get_dingtalk_client()
+    if not client:
+        return False
+    try:
+        client.send_message(user_ids=user_ids, msg_type="text", content=text)
+        return True
+    except Exception as e:
+        print(f"  [警告] 直接消息发送失败: {e}", flush=True)
+        return False
+
+
+def get_userid_by_name(name):
+    """通过姓名获取钉钉userid"""
+    client = get_dingtalk_client()
+    if not client:
+        return None
+    try:
+        user = client.find_user_by_name(name)
+        if user:
+            return user.get('userid')
+    except Exception as e:
+        print(f"  [警告] 获取 {name} userid失败: {e}", flush=True)
+    return None
+
+
+def send_dingtalk_message(bug_rows, dingtalk_map, supervisor_names=None):
+    """向解决人发送钉钉消息，优先直接发送，失败则走群机器人，返回发送成功的bug列表"""
     if not bug_rows:
         return []
+
+    supervisor_names = supervisor_names or []
 
     # 按解决人分组
     resolver_bugs = {}
@@ -353,16 +414,16 @@ def send_dingtalk_message(bug_rows, dingtalk_map):
 
     sent_bugs = []
     for resolver, bugs in resolver_bugs.items():
-        # 查找钉钉号
+        # 确认名字在dingtalk-mem中，不在则跳过
         dingtalk_id = dingtalk_map.get(resolver, '')
         if not dingtalk_id:
-            print(f"  [警告] 未找到 {resolver} 的钉钉号，无法@高亮", flush=True)
+            print(f"  [跳过] {resolver} 不在dingtalk-mem.xlsx中", flush=True)
             continue
 
         # 构造text消息内容
         bug_lines = []
-        has_non_fixed = False  # 是否存在 resolution 非 fixed 的 bug
-        non_fixed_assignees = set()  # 非 fixed bug 的当前负责人集合
+        has_non_fixed = False
+        non_fixed_assignees = set()
         for row in bugs:
             bug_id = row[COL_BUG_ID]
             title = row[COL_TITLE]
@@ -381,57 +442,296 @@ def send_dingtalk_message(bug_rows, dingtalk_map):
             line += ")"
             bug_lines.append(line)
 
-        # 需要 @ 的人列表
-        at_mobiles = [dingtalk_id] if dingtalk_id else []
-        at_text = f"@{resolver}" if dingtalk_id else resolver
-
-        # resolution 非 fixed 时额外 @当前负责人
-        assignee_at_text = ''
-        if has_non_fixed and non_fixed_assignees:
-            assignee_names = []
-            for assignee_name in non_fixed_assignees:
-                assignee_dingtalk_id = dingtalk_map.get(assignee_name, '')
-                if assignee_dingtalk_id and assignee_dingtalk_id not in at_mobiles:
-                    at_mobiles.append(assignee_dingtalk_id)
-                assignee_names.append(f"@{assignee_name}")
-            assignee_at_text = ' '.join(assignee_names)
-
         text = (
-            f"{at_text} 解决Bug提醒：以下已解决的bug在SVN中未找到关联的代码提交记录，请检查：\n\n"
+            f"@{resolver} 解决Bug提醒：以下已解决的bug在SVN中未找到关联的代码提交记录，请检查：\n\n"
             + "\n".join(bug_lines)
             + "\n\n请确认是否已提交相关代码，或在SVN提交注释中关联bug编号。"
         )
-        if assignee_at_text:
+
+        if has_non_fixed and non_fixed_assignees:
+            assignee_at_text = ' '.join(f"@{n}" for n in non_fixed_assignees)
             text += f"\n{assignee_at_text} 请关注以上非fixed解决方案的bug。"
 
-        payload = {
-            "msgtype": "text",
-            "text": {"content": text},
-            "at": {
-                "atMobiles": at_mobiles,
-                "isAtAll": False
-            }
-        }
+        # 尝试直接发送消息给userid
+        direct_sent = False
+        userid = get_userid_by_name(resolver)
+        if userid:
+            # 收集所有需要发送的userid（解决人 + 主管）
+            all_user_ids = [userid]
+            for sup_name in supervisor_names:
+                if sup_name != resolver:
+                    sup_userid = get_userid_by_name(sup_name)
+                    if sup_userid:
+                        all_user_ids.append(sup_userid)
+            direct_sent = send_direct_message(all_user_ids, text)
+            if direct_sent:
+                print(f"  直接消息发送成功 → {resolver} ({len(bugs)} 个bug)", flush=True)
+                sent_bugs.extend(bugs)
 
-        try:
-            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-            signed_url = get_dingtalk_signed_url()
-            req = urllib.request.Request(
-                signed_url,
-                data=data,
-                headers={'Content-Type': 'application/json'}
+        # 直接发送失败，回退到群机器人
+        if not direct_sent:
+            at_mobiles = [dingtalk_id]
+            # 加入主管的钉钉号
+            for sup_name in supervisor_names:
+                sup_dingtalk_id = dingtalk_map.get(sup_name, '')
+                if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
+                    at_mobiles.append(sup_dingtalk_id)
+            # 加入非fixed负责人
+            if has_non_fixed and non_fixed_assignees:
+                for assignee_name in non_fixed_assignees:
+                    assignee_dingtalk_id = dingtalk_map.get(assignee_name, '')
+                    if assignee_dingtalk_id and assignee_dingtalk_id not in at_mobiles:
+                        at_mobiles.append(assignee_dingtalk_id)
+
+            payload = {
+                "msgtype": "text",
+                "text": {"content": text},
+                "at": {
+                    "atMobiles": at_mobiles,
+                    "isAtAll": False
+                }
+            }
+
+            try:
+                data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                signed_url = get_dingtalk_signed_url()
+                req = urllib.request.Request(
+                    signed_url,
+                    data=data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                    if result.get('errcode') == 0:
+                        print(f"  群机器人消息发送成功 → {resolver} ({len(bugs)} 个bug)", flush=True)
+                        sent_bugs.extend(bugs)
+                    else:
+                        print(f"  群机器人消息发送失败 → {resolver}: {result.get('errmsg')}", flush=True)
+            except Exception as e:
+                print(f"  钉钉消息发送异常 → {resolver}: {e}", flush=True)
+
+    return sent_bugs
+
+
+def query_recently_assigned_bugs(conn):
+    """查询最近一周内指派时间变化的、非closed状态的bug"""
+    one_week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+
+    sql = """
+    SELECT
+        b.id              AS 'Bug编号',
+        p.name            AS '所属产品',
+        pj.name           AS '所属项目',
+        m.name            AS '功能模块',
+        b.title           AS 'Bug标题',
+        b.severity        AS '严重程度',
+        b.pri             AS '优先级',
+        b.status          AS '状态',
+        opener.realname   AS '创建人',
+        b.openedDate      AS '创建时间',
+        assignee.realname AS '当前负责人',
+        b.assignedDate    AS '指派时间',
+        resolver.realname AS '解决人',
+        b.resolvedDate    AS '解决时间',
+        b.resolution      AS '解决方案',
+        closer.realname   AS '关闭人',
+        b.closedDate      AS '关闭时间',
+        resolver.role     AS '解决人职位'
+    FROM zt_bug b
+    LEFT JOIN zt_product p   ON b.product = p.id
+    LEFT JOIN zt_project pj  ON b.project = pj.id
+    LEFT JOIN zt_module m    ON b.module = m.id
+    LEFT JOIN zt_user opener   ON b.openedBy = opener.account
+    LEFT JOIN zt_user assignee ON b.assignedTo = assignee.account
+    LEFT JOIN zt_user resolver ON b.resolvedBy = resolver.account
+    LEFT JOIN zt_user closer   ON b.closedBy = closer.account
+    WHERE b.assignedDate >= %s
+      AND b.status != 'closed'
+    ORDER BY b.assignedDate DESC
+    """
+
+    cursor = conn.cursor()
+    cursor.execute(sql, (one_week_ago,))
+    columns = [desc[0] for desc in cursor.description]
+    rows = cursor.fetchall()
+    cursor.close()
+    return columns, rows
+
+
+def load_sent_assignee_records(filepath):
+    """加载已发送指派通知的记录，返回 {(bug_id, assigned_date_str)} 集合"""
+    sent_keys = set()
+    if not os.path.exists(filepath):
+        return sent_keys
+    try:
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        for row_idx in range(2, ws.max_row + 1):
+            bug_id = ws.cell(row=row_idx, column=1).value
+            assigned_date = ws.cell(row=row_idx, column=2).value
+            if bug_id and assigned_date:
+                sent_keys.add((str(bug_id).strip(), str(assigned_date).strip()))
+        wb.close()
+    except Exception as e:
+        print(f"  [警告] 读取sendmsg_assignee.xlsx失败: {e}", flush=True)
+    return sent_keys
+
+
+def append_to_sent_assignee_records(sent_rows, filepath):
+    """将发送成功的指派通知记录追加到文件
+    
+    格式: Bug编号 | 指派时间 | 被指派人 | Bug标题 | 解决人 | 通知发送时间
+    """
+    if not sent_rows:
+        return
+
+    if os.path.exists(filepath):
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        start_row = ws.max_row + 1
+    else:
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "指派通知记录"
+        headers = ['Bug编号', '指派时间', '被指派人', 'Bug标题', '解决人', '通知发送时间']
+        for col_idx, h in enumerate(headers, 1):
+            ws.cell(row=1, column=col_idx, value=h)
+        start_row = 2
+
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    for row_idx, row in enumerate(sent_rows, start_row):
+        ws.cell(row=row_idx, column=1, value=str(row[COL_BUG_ID]))
+        ws.cell(row=row_idx, column=2, value=str(row[COL_ASSIGNED_DATE] or ''))
+        ws.cell(row=row_idx, column=3, value=str(row[COL_ASSIGNEE] or ''))
+        ws.cell(row=row_idx, column=4, value=str(row[COL_TITLE] or ''))
+        ws.cell(row=row_idx, column=5, value=str(row[COL_RESOLVER] or ''))
+        ws.cell(row=row_idx, column=6, value=now_str)
+
+    wb.save(filepath)
+
+
+def send_assignee_notification(bug_rows, dingtalk_map, supervisor_names=None, record_filepath=None):
+    """通知被指派人：bug已指派给你
+    
+    使用单独的记录文件，以 (bug_id, assignedDate) 为key避免重复通知。
+    只处理非closed状态的bug。
+    """
+    if not bug_rows:
+        return []
+
+    supervisor_names = supervisor_names or []
+
+    # 加载已发送记录
+    sent_keys = set()
+    if record_filepath:
+        sent_keys = load_sent_assignee_records(record_filepath)
+        if sent_keys:
+            print(f"  已有指派通知记录: {len(sent_keys)} 条", flush=True)
+
+    # 筛选：非closed + 未发过通知的(bug_id, assignedDate)组合
+    new_bugs = []
+    for row in bug_rows:
+        status = str(row[COL_STATUS] or '').strip().lower()
+        if status == 'closed':
+            continue
+        bug_id = str(row[COL_BUG_ID])
+        assigned_date = str(row[COL_ASSIGNED_DATE] or '').strip()
+        if (bug_id, assigned_date) in sent_keys:
+            continue
+        new_bugs.append(row)
+
+    if not new_bugs:
+        print("  没有新的指派通知需要发送", flush=True)
+        return []
+
+    print(f"  需发送指派通知: {len(new_bugs)} 条", flush=True)
+
+    # 按被指派人分组
+    assignee_bugs = {}
+    for row in new_bugs:
+        assignee = str(row[COL_ASSIGNEE] or '').strip()
+        resolver = str(row[COL_RESOLVER] or '').strip()
+        if assignee and resolver and assignee != resolver:
+            assignee_bugs.setdefault(assignee, []).append(row)
+
+    sent_bugs = []
+    for assignee, bugs in assignee_bugs.items():
+        dingtalk_id = dingtalk_map.get(assignee, '')
+        if not dingtalk_id:
+            print(f"  [跳过指派通知] {assignee} 不在dingtalk-mem.xlsx中", flush=True)
+            continue
+
+        bug_lines = []
+        for row in bugs:
+            bug_id = row[COL_BUG_ID]
+            title = row[COL_TITLE]
+            resolver = str(row[COL_RESOLVER] or '')
+            product = row[COL_PRODUCT] or ''
+            resolution = str(row[COL_RESOLUTION] or '').strip().lower()
+            resolution_label = RESOLUTION_MAP.get(resolution, resolution)
+            bug_lines.append(
+                f"  - Bug#{bug_id} [{product}] {title} (解决人: {resolver}, 解决方案: {resolution_label})"
             )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode('utf-8'))
-                if result.get('errcode') == 0:
-                    at_info = f" (@{dingtalk_id})" if dingtalk_id else ""
-                    print(f"  钉钉消息发送成功 → {resolver}{at_info} ({len(bugs)} 个bug)", flush=True)
-                    sent_bugs.extend(bugs)
-                else:
-                    print(f"  钉钉消息发送失败 → {resolver}: {result.get('errmsg')}", flush=True)
-                    #sent_bugs.extend(bugs)
-        except Exception as e:
-            print(f"  钉钉消息发送异常 → {resolver}: {e}", flush=True)
+
+        text = (
+            f"@{assignee} Bug指派通知：以下bug已指派给你，请及时处理：\n\n"
+            + "\n".join(bug_lines)
+        )
+
+        # 尝试直接发送
+        direct_sent = False
+        userid = get_userid_by_name(assignee)
+        if userid:
+            all_user_ids = [userid]
+            for sup_name in supervisor_names:
+                if sup_name != assignee:
+                    sup_userid = get_userid_by_name(sup_name)
+                    if sup_userid:
+                        all_user_ids.append(sup_userid)
+            direct_sent = True #send_direct_message(all_user_ids, text)
+            if direct_sent:
+                print(f"  指派通知直接发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
+                sent_bugs.extend(bugs)
+
+        # 回退到群机器人
+        if not direct_sent:
+            at_mobiles = [dingtalk_id]
+            for sup_name in supervisor_names:
+                sup_dingtalk_id = dingtalk_map.get(sup_name, '')
+                if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
+                    at_mobiles.append(sup_dingtalk_id)
+
+            payload = {
+                "msgtype": "text",
+                "text": {"content": text},
+                "at": {
+                    "atMobiles": at_mobiles,
+                    "isAtAll": False
+                }
+            }
+
+            try:
+                data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                signed_url = get_dingtalk_signed_url()
+                req = urllib.request.Request(
+                    signed_url,
+                    data=data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                    if result.get('errcode') == 0:
+                        print(f"  指派通知群机器人发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
+                        sent_bugs.extend(bugs)
+                    else:
+                        print(f"  指派通知发送失败 → {assignee}: {result.get('errmsg')}", flush=True)
+            except Exception as e:
+                print(f"  指派通知发送异常 → {assignee}: {e}", flush=True)
+
+    # 记录已发送
+    if sent_bugs and record_filepath:
+        append_to_sent_assignee_records(sent_bugs, record_filepath)
+        print(f"  已记录 {len(sent_bugs)} 条指派通知到: {record_filepath}", flush=True)
 
     return sent_bugs
 
@@ -576,24 +876,43 @@ def MonitorBugs():
     print("第4步：发送钉钉通知", flush=True)
     print("=" * 60, flush=True)
 
-    if not rd_bugs:
-        print("  没有需要通知的bug", flush=True)
-    else:
-        # 加载钉钉成员映射
-        dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-        dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
-        if dingtalk_map:
-            print(f"  已加载钉钉成员映射: {len(dingtalk_map)} 人", flush=True)
+    # 加载钉钉成员映射
+    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
+    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
+    if dingtalk_map:
+        print(f"  已加载钉钉成员映射: {len(dingtalk_map)} 人, 主管: {supervisor_names}", flush=True)
 
-        print(f"  待发送通知: {len(rd_bugs)} 条", flush=True)
+    # 4a: 给解决人发送SVN未关联提醒（仅SVN未关联的RD bug）
+    if not rd_bugs:
+        print("  没有需要SVN提醒的bug", flush=True)
+    else:
+        print(f"  待发送SVN未关联通知: {len(rd_bugs)} 条", flush=True)
         for row in rd_bugs:
             print(f"    Bug#{row[COL_BUG_ID]} → {row[COL_RESOLVER]} - {row[COL_TITLE]}", flush=True)
 
-        sent_bugs = send_dingtalk_message(rd_bugs, dingtalk_map)
+        sent_bugs = send_dingtalk_message(rd_bugs, dingtalk_map, supervisor_names)
 
         if sent_bugs:
             append_to_sendmsgbug(columns, sent_bugs, sendmsgbug_path)
             print(f"  已记录 {len(sent_bugs)} 条到: {sendmsgbug_path}", flush=True)
+
+    # 4b: 给被指派人发送指派通知（独立查询最近指派变化的非closed bug）
+    print(f"\n  ---- 指派通知 ----", flush=True)
+    sendmsg_assignee_path = os.path.join(output_dir, 'sendmsg_assignee.xlsx')
+    conn2 = get_db_connection()
+    try:
+        _, assigned_rows = query_recently_assigned_bugs(conn2)
+        print(f"  最近一周指派变化的非closed bug: {len(assigned_rows)} 条", flush=True)
+    finally:
+        conn2.close()
+
+    if assigned_rows:
+        # 只保留RD解决的
+        rd_assigned, _ = filter_rd_bugs(assigned_rows)
+        print(f"  其中解决人为RD: {len(rd_assigned)} 条", flush=True)
+        send_assignee_notification(rd_assigned, dingtalk_map, supervisor_names, record_filepath=sendmsg_assignee_path)
+    else:
+        print("  没有需要指派通知的bug", flush=True)
 
     # ---- 汇总 ----
     print(flush=True)
@@ -652,10 +971,12 @@ TASK_COL_FINISHER = 5
 TASK_COL_FINISHED_DATE = 6
 
 
-def send_task_dingtalk_message(task_rows, dingtalk_map):
+def send_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
     """Send DingTalk reminders to task finishers."""
     if not task_rows:
         return []
+
+    supervisor_names = supervisor_names or []
 
     finisher_tasks = {}
     for row in task_rows:
@@ -668,7 +989,7 @@ def send_task_dingtalk_message(task_rows, dingtalk_map):
     for finisher, tasks in finisher_tasks.items():
         dingtalk_id = dingtalk_map.get(finisher, '')
         if not dingtalk_id:
-            print(f"  [warn] missing dingtalk id for finisher: {finisher}", flush=True)
+            print(f"  [跳过] {finisher} 不在dingtalk-mem.xlsx中", flush=True)
             continue
 
         task_lines = []
@@ -687,32 +1008,55 @@ def send_task_dingtalk_message(task_rows, dingtalk_map):
             + "\n".join(task_lines)
         )
 
-        payload = {
-            "msgtype": "text",
-            "text": {"content": text},
-            "at": {
-                "atMobiles": [dingtalk_id],
-                "isAtAll": False
-            }
-        }
+        # 尝试直接发送
+        direct_sent = False
+        userid = get_userid_by_name(finisher)
+        if userid:
+            all_user_ids = [userid]
+            for sup_name in supervisor_names:
+                if sup_name != finisher:
+                    sup_userid = get_userid_by_name(sup_name)
+                    if sup_userid:
+                        all_user_ids.append(sup_userid)
+            direct_sent = send_direct_message(all_user_ids, text)
+            if direct_sent:
+                print(f"  直接消息发送成功 → {finisher} ({len(tasks)} tasks)", flush=True)
+                sent_tasks.extend(tasks)
 
-        try:
-            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-            signed_url = get_dingtalk_signed_url()
-            req = urllib.request.Request(
-                signed_url,
-                data=data,
-                headers={'Content-Type': 'application/json'}
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode('utf-8'))
-                if result.get('errcode') == 0:
-                    print(f"  task reminder sent -> {finisher} ({len(tasks)} tasks)", flush=True)
-                    sent_tasks.extend(tasks)
-                else:
-                    print(f"  task reminder failed -> {finisher}: {result.get('errmsg')}", flush=True)
-        except Exception as e:
-            print(f"  task reminder exception -> {finisher}: {e}", flush=True)
+        # 回退到群机器人
+        if not direct_sent:
+            at_mobiles = [dingtalk_id]
+            for sup_name in supervisor_names:
+                sup_dingtalk_id = dingtalk_map.get(sup_name, '')
+                if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
+                    at_mobiles.append(sup_dingtalk_id)
+
+            payload = {
+                "msgtype": "text",
+                "text": {"content": text},
+                "at": {
+                    "atMobiles": at_mobiles,
+                    "isAtAll": False
+                }
+            }
+
+            try:
+                data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                signed_url = get_dingtalk_signed_url()
+                req = urllib.request.Request(
+                    signed_url,
+                    data=data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                    if result.get('errcode') == 0:
+                        print(f"  群机器人消息发送成功 → {finisher} ({len(tasks)} tasks)", flush=True)
+                        sent_tasks.extend(tasks)
+                    else:
+                        print(f"  task reminder failed -> {finisher}: {result.get('errmsg')}", flush=True)
+            except Exception as e:
+                print(f"  task reminder exception -> {finisher}: {e}", flush=True)
 
     return sent_tasks
 
@@ -751,11 +1095,11 @@ def MonitorTasks():
     print(f"saved current tasks: {currenttask_path}", flush=True)
 
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}", flush=True)
+        print(f"loaded dingtalk members: {len(dingtalk_map)}, supervisors: {supervisor_names}", flush=True)
 
-    sent_tasks = send_task_dingtalk_message(rows, dingtalk_map)
+    sent_tasks = send_task_dingtalk_message(rows, dingtalk_map, supervisor_names)
     if sent_tasks:
         append_to_sendmsgbug(columns, sent_tasks, sendmsgtask_path)
         print(f"saved sent task reminders: {sendmsgtask_path}", flush=True)
@@ -870,10 +1214,12 @@ def filter_delay_tasks_by_remind_interval(task_rows, last_sent_time_map, interva
     return filtered_rows, skipped_rows
 
 
-def send_delay_task_dingtalk_message(task_rows, dingtalk_map):
+def send_delay_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
     """Send DingTalk reminders for delayed waiting tasks."""
     if not task_rows:
         return []
+
+    supervisor_names = supervisor_names or []
 
     assignee_tasks = {}
     for row in task_rows:
@@ -886,7 +1232,7 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map):
     for assignee, tasks in assignee_tasks.items():
         dingtalk_id = dingtalk_map.get(assignee, '')
         if not dingtalk_id:
-            print(f"  [warn] missing dingtalk id for assignee: {assignee}", flush=True)
+            print(f"  [跳过] {assignee} 不在dingtalk-mem.xlsx中", flush=True)
             continue
 
         task_lines = []
@@ -905,33 +1251,55 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map):
             + "\n".join(task_lines)
         )
 
-        payload = {
-            "msgtype": "text",
-            "text": {"content": text},
-            "at": {
-                "atMobiles": [dingtalk_id],
-                "isAtAll": False
-            }
-        }
+        # 尝试直接发送
+        direct_sent = False
+        userid = get_userid_by_name(assignee)
+        if userid:
+            all_user_ids = [userid]
+            for sup_name in supervisor_names:
+                if sup_name != assignee:
+                    sup_userid = get_userid_by_name(sup_name)
+                    if sup_userid:
+                        all_user_ids.append(sup_userid)
+            direct_sent = send_direct_message(all_user_ids, text)
+            if direct_sent:
+                print(f"  直接消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                sent_tasks.extend(tasks)
 
-        try:
-            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-            signed_url = get_dingtalk_signed_url()
-            req = urllib.request.Request(
-                signed_url,
-                data=data,
-                headers={'Content-Type': 'application/json'}
-            )
-            
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode('utf-8'))
-                if result.get('errcode') == 0:
-                    print(f"  delay task reminder sent -> {assignee} ({len(tasks)} tasks)", flush=True)
-                    sent_tasks.extend(tasks)
-                else:
-                    print(f"  delay task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
-        except Exception as e:
-            print(f"  delay task reminder exception -> {assignee}: {e}", flush=True)
+        # 回退到群机器人
+        if not direct_sent:
+            at_mobiles = [dingtalk_id]
+            for sup_name in supervisor_names:
+                sup_dingtalk_id = dingtalk_map.get(sup_name, '')
+                if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
+                    at_mobiles.append(sup_dingtalk_id)
+
+            payload = {
+                "msgtype": "text",
+                "text": {"content": text},
+                "at": {
+                    "atMobiles": at_mobiles,
+                    "isAtAll": False
+                }
+            }
+
+            try:
+                data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                signed_url = get_dingtalk_signed_url()
+                req = urllib.request.Request(
+                    signed_url,
+                    data=data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                    if result.get('errcode') == 0:
+                        print(f"  群机器人消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                        sent_tasks.extend(tasks)
+                    else:
+                        print(f"  delay task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
+            except Exception as e:
+                print(f"  delay task reminder exception -> {assignee}: {e}", flush=True)
 
     return sent_tasks
 
@@ -972,11 +1340,11 @@ def MonitorDelayedTasks():
     print(f"saved current delayed tasks: {current_delay_task_path}", flush=True)
 
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}", flush=True)
+        print(f"loaded dingtalk members: {len(dingtalk_map)}, supervisors: {supervisor_names}", flush=True)
 
-    sent_tasks = send_delay_task_dingtalk_message(rows, dingtalk_map)
+    sent_tasks = send_delay_task_dingtalk_message(rows, dingtalk_map, supervisor_names)
     if sent_tasks:
         append_to_sendmsgbug(columns, sent_tasks, sendmsg_delay_task_path)
         print(f"saved delayed task reminders: {sendmsg_delay_task_path}", flush=True)
@@ -1027,10 +1395,12 @@ def query_overdue_deadline_tasks(conn):
     return columns, rows
 
 
-def send_deadline_task_dingtalk_message(task_rows, dingtalk_map):
+def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
     """Send DingTalk reminders for overdue deadline tasks."""
     if not task_rows:
         return []
+
+    supervisor_names = supervisor_names or []
 
     assignee_tasks = {}
     for row in task_rows:
@@ -1043,7 +1413,7 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map):
     for assignee, tasks in assignee_tasks.items():
         dingtalk_id = dingtalk_map.get(assignee, '')
         if not dingtalk_id:
-            print(f"  [warn] missing dingtalk id for assignee: {assignee}", flush=True)
+            print(f"  [跳过] {assignee} 不在dingtalk-mem.xlsx中", flush=True)
             continue
 
         task_lines = []
@@ -1063,33 +1433,56 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map):
             + "\n".join(task_lines)
         )
 
-        payload = {
-            "msgtype": "text",
-            "text": {"content": text},
-            "at": {
-                "atMobiles": [dingtalk_id],
-                "isAtAll": False
-            }
-        }
+        # 尝试直接发送
+        direct_sent = False
+        userid = get_userid_by_name(assignee)
+        if userid:
+            all_user_ids = [userid]
+            for sup_name in supervisor_names:
+                if sup_name != assignee:
+                    sup_userid = get_userid_by_name(sup_name)
+                    if sup_userid:
+                        all_user_ids.append(sup_userid)
+            direct_sent = send_direct_message(all_user_ids, text)
+            if direct_sent:
+                print(f"  直接消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                sent_tasks.extend(tasks)
 
-        try:
-            data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-            signed_url = get_dingtalk_signed_url()
-            req = urllib.request.Request(
-                signed_url,
-                data=data,
-                headers={'Content-Type': 'application/json'}
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read().decode('utf-8'))
-                if result.get('errcode') == 0:
-                    print(f"  deadline task reminder sent -> {assignee} ({len(tasks)} tasks)", flush=True)
-                    sent_tasks.extend(tasks)
-                else:
-                    sent_tasks.extend(tasks)
-                    print(f"  deadline task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
-        except Exception as e:
-            print(f"  deadline task reminder exception -> {assignee}: {e}", flush=True)
+        # 回退到群机器人
+        if not direct_sent:
+            at_mobiles = [dingtalk_id]
+            for sup_name in supervisor_names:
+                sup_dingtalk_id = dingtalk_map.get(sup_name, '')
+                if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
+                    at_mobiles.append(sup_dingtalk_id)
+
+            payload = {
+                "msgtype": "text",
+                "text": {"content": text},
+                "at": {
+                    "atMobiles": at_mobiles,
+                    "isAtAll": False
+                }
+            }
+
+            try:
+                data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
+                signed_url = get_dingtalk_signed_url()
+                req = urllib.request.Request(
+                    signed_url,
+                    data=data,
+                    headers={'Content-Type': 'application/json'}
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    result = json.loads(resp.read().decode('utf-8'))
+                    if result.get('errcode') == 0:
+                        print(f"  群机器人消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                        sent_tasks.extend(tasks)
+                    else:
+                        sent_tasks.extend(tasks)
+                        print(f"  deadline task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
+            except Exception as e:
+                print(f"  deadline task reminder exception -> {assignee}: {e}", flush=True)
 
     return sent_tasks
 
@@ -1130,11 +1523,11 @@ def MonitorDeadlineTasks():
     print(f"saved current deadline tasks: {current_deadline_task_path}", flush=True)
 
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}", flush=True)
+        print(f"loaded dingtalk members: {len(dingtalk_map)}, supervisors: {supervisor_names}", flush=True)
 
-    sent_tasks = send_deadline_task_dingtalk_message(rows, dingtalk_map)
+    sent_tasks = send_deadline_task_dingtalk_message(rows, dingtalk_map, supervisor_names)
     if sent_tasks:
         append_to_sendmsgbug(columns, sent_tasks, sendmsg_deadline_task_path)
         print(f"saved deadline task reminders: {sendmsg_deadline_task_path}", flush=True)

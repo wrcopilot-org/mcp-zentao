@@ -1,2 +1,6 @@
 
 __pycache__/
+.env
+dingtalk.env
+monitor-zentao/code/.env
+monitor-zentao/code/dingtalk.env
