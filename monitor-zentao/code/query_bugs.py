@@ -342,18 +342,20 @@ def get_dingtalk_signed_url():
 
 
 def load_dingtalk_member_map(filepath):
-    """从dingtalk-mem.xlsx加载 {姓名: 钉钉号} 映射
+    """从dingtalk-mem.xlsx加载成员映射
     
-    Excel格式: 列1=姓名, 列2=钉钉号(手机号), 列3=职务
-    返回: (member_map, supervisor_names)
+    Excel格式: 列1=姓名, 列2=钉钉号(手机号), 列3=职务, 列4=小组
+    返回: (member_map, member_group_map, group_supervisors)
         member_map: {姓名: 钉钉号}
-        supervisor_names: [主管姓名列表]
+        member_group_map: {姓名: 小组名}
+        group_supervisors: {小组名: [主管姓名列表]}
     """
     member_map = {}
-    supervisor_names = []
+    member_group_map = {}
+    group_supervisors = {}
     if not os.path.exists(filepath):
         print(f"  [警告] 未找到钉钉成员映射文件: {filepath}", flush=True)
-        return member_map, supervisor_names
+        return member_map, member_group_map, group_supervisors
     try:
         wb = openpyxl.load_workbook(filepath)
         ws = wb.active
@@ -361,15 +363,27 @@ def load_dingtalk_member_map(filepath):
             name = ws.cell(row=row_idx, column=1).value
             dingtalk_id = ws.cell(row=row_idx, column=2).value
             role = ws.cell(row=row_idx, column=3).value
+            group = ws.cell(row=row_idx, column=4).value
             if name and dingtalk_id:
                 name_str = str(name).strip()
                 member_map[name_str] = str(dingtalk_id).strip()
-                if role and str(role).strip() == '主管':
-                    supervisor_names.append(name_str)
+                group_str = str(group).strip() if group else ''
+                if group_str:
+                    member_group_map[name_str] = group_str
+                if role and str(role).strip() == '主管' and group_str:
+                    group_supervisors.setdefault(group_str, []).append(name_str)
         wb.close()
     except Exception as e:
         print(f"  [警告] 读取dingtalk-mem.xlsx失败: {e}", flush=True)
-    return member_map, supervisor_names
+    return member_map, member_group_map, group_supervisors
+
+
+def get_supervisors_for_person(name, member_group_map, group_supervisors):
+    """获取某人所在小组的主管列表"""
+    group = member_group_map.get(name, '')
+    if not group:
+        return []
+    return group_supervisors.get(group, [])
 
 
 def send_direct_message(user_ids, text):
@@ -399,12 +413,13 @@ def get_userid_by_name(name):
     return None
 
 
-def send_dingtalk_message(bug_rows, dingtalk_map, supervisor_names=None):
+def send_dingtalk_message(bug_rows, dingtalk_map, member_group_map=None, group_supervisors=None):
     """向解决人发送钉钉消息，优先直接发送，失败则走群机器人，返回发送成功的bug列表"""
     if not bug_rows:
         return []
 
-    supervisor_names = supervisor_names or []
+    member_group_map = member_group_map or {}
+    group_supervisors = group_supervisors or {}
 
     # 按解决人分组
     resolver_bugs = {}
@@ -456,9 +471,10 @@ def send_dingtalk_message(bug_rows, dingtalk_map, supervisor_names=None):
         direct_sent = False
         userid = get_userid_by_name(resolver)
         if userid:
-            # 收集所有需要发送的userid（解决人 + 主管）
+            # 收集所有需要发送的userid（解决人 + 对应小组主管）
             all_user_ids = [userid]
-            for sup_name in supervisor_names:
+            resolver_supervisors = get_supervisors_for_person(resolver, member_group_map, group_supervisors)
+            for sup_name in resolver_supervisors:
                 if sup_name != resolver:
                     sup_userid = get_userid_by_name(sup_name)
                     if sup_userid:
@@ -471,8 +487,9 @@ def send_dingtalk_message(bug_rows, dingtalk_map, supervisor_names=None):
         # 直接发送失败，回退到群机器人
         if not direct_sent:
             at_mobiles = [dingtalk_id]
-            # 加入主管的钉钉号
-            for sup_name in supervisor_names:
+            # 加入对应小组主管的钉钉号
+            resolver_supervisors = get_supervisors_for_person(resolver, member_group_map, group_supervisors)
+            for sup_name in resolver_supervisors:
                 sup_dingtalk_id = dingtalk_map.get(sup_name, '')
                 if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
                     at_mobiles.append(sup_dingtalk_id)
@@ -610,7 +627,7 @@ def append_to_sent_assignee_records(sent_rows, filepath):
     wb.save(filepath)
 
 
-def send_assignee_notification(bug_rows, dingtalk_map, supervisor_names=None, record_filepath=None):
+def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, group_supervisors=None, record_filepath=None):
     """通知被指派人：bug已指派给你
     
     使用单独的记录文件，以 (bug_id, assignedDate) 为key避免重复通知。
@@ -619,7 +636,8 @@ def send_assignee_notification(bug_rows, dingtalk_map, supervisor_names=None, re
     if not bug_rows:
         return []
 
-    supervisor_names = supervisor_names or []
+    member_group_map = member_group_map or {}
+    group_supervisors = group_supervisors or {}
 
     # 加载已发送记录
     sent_keys = set()
@@ -683,20 +701,22 @@ def send_assignee_notification(bug_rows, dingtalk_map, supervisor_names=None, re
         userid = get_userid_by_name(assignee)
         if userid:
             all_user_ids = [userid]
-            for sup_name in supervisor_names:
+            assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
+            for sup_name in assignee_supervisors:
                 if sup_name != assignee:
                     sup_userid = get_userid_by_name(sup_name)
                     if sup_userid:
                         all_user_ids.append(sup_userid)
-            direct_sent = True #send_direct_message(all_user_ids, text)
+            direct_sent = send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  指派通知直接发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
                 sent_bugs.extend(bugs)
 
         # 回退到群机器人
-        if not direct_sent:
+        if False: #not direct_sent:
             at_mobiles = [dingtalk_id]
-            for sup_name in supervisor_names:
+            assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
+            for sup_name in assignee_supervisors:
                 sup_dingtalk_id = dingtalk_map.get(sup_name, '')
                 if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
                     at_mobiles.append(sup_dingtalk_id)
@@ -878,9 +898,9 @@ def MonitorBugs():
 
     # 加载钉钉成员映射
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"  已加载钉钉成员映射: {len(dingtalk_map)} 人, 主管: {supervisor_names}", flush=True)
+        print(f"  已加载钉钉成员映射: {len(dingtalk_map)} 人, 小组主管: {group_supervisors}", flush=True)
 
     # 4a: 给解决人发送SVN未关联提醒（仅SVN未关联的RD bug）
     if not rd_bugs:
@@ -890,7 +910,7 @@ def MonitorBugs():
         for row in rd_bugs:
             print(f"    Bug#{row[COL_BUG_ID]} → {row[COL_RESOLVER]} - {row[COL_TITLE]}", flush=True)
 
-        sent_bugs = send_dingtalk_message(rd_bugs, dingtalk_map, supervisor_names)
+        sent_bugs = send_dingtalk_message(rd_bugs, dingtalk_map, member_group_map, group_supervisors)
 
         if sent_bugs:
             append_to_sendmsgbug(columns, sent_bugs, sendmsgbug_path)
@@ -910,7 +930,7 @@ def MonitorBugs():
         # 只保留RD解决的
         rd_assigned, _ = filter_rd_bugs(assigned_rows)
         print(f"  其中解决人为RD: {len(rd_assigned)} 条", flush=True)
-        send_assignee_notification(rd_assigned, dingtalk_map, supervisor_names, record_filepath=sendmsg_assignee_path)
+        send_assignee_notification(rd_assigned, dingtalk_map, member_group_map, group_supervisors, record_filepath=sendmsg_assignee_path)
     else:
         print("  没有需要指派通知的bug", flush=True)
 
@@ -971,12 +991,13 @@ TASK_COL_FINISHER = 5
 TASK_COL_FINISHED_DATE = 6
 
 
-def send_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
+def send_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=None, group_supervisors=None):
     """Send DingTalk reminders to task finishers."""
     if not task_rows:
         return []
 
-    supervisor_names = supervisor_names or []
+    member_group_map = member_group_map or {}
+    group_supervisors = group_supervisors or {}
 
     finisher_tasks = {}
     for row in task_rows:
@@ -1013,7 +1034,8 @@ def send_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
         userid = get_userid_by_name(finisher)
         if userid:
             all_user_ids = [userid]
-            for sup_name in supervisor_names:
+            finisher_supervisors = get_supervisors_for_person(finisher, member_group_map, group_supervisors)
+            for sup_name in finisher_supervisors:
                 if sup_name != finisher:
                     sup_userid = get_userid_by_name(sup_name)
                     if sup_userid:
@@ -1026,7 +1048,8 @@ def send_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
         # 回退到群机器人
         if not direct_sent:
             at_mobiles = [dingtalk_id]
-            for sup_name in supervisor_names:
+            finisher_supervisors = get_supervisors_for_person(finisher, member_group_map, group_supervisors)
+            for sup_name in finisher_supervisors:
                 sup_dingtalk_id = dingtalk_map.get(sup_name, '')
                 if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
                     at_mobiles.append(sup_dingtalk_id)
@@ -1095,11 +1118,11 @@ def MonitorTasks():
     print(f"saved current tasks: {currenttask_path}", flush=True)
 
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}, supervisors: {supervisor_names}", flush=True)
+        print(f"loaded dingtalk members: {len(dingtalk_map)}, group_supervisors: {group_supervisors}", flush=True)
 
-    sent_tasks = send_task_dingtalk_message(rows, dingtalk_map, supervisor_names)
+    sent_tasks = send_task_dingtalk_message(rows, dingtalk_map, member_group_map, group_supervisors)
     if sent_tasks:
         append_to_sendmsgbug(columns, sent_tasks, sendmsgtask_path)
         print(f"saved sent task reminders: {sendmsgtask_path}", flush=True)
@@ -1214,12 +1237,13 @@ def filter_delay_tasks_by_remind_interval(task_rows, last_sent_time_map, interva
     return filtered_rows, skipped_rows
 
 
-def send_delay_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
+def send_delay_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=None, group_supervisors=None):
     """Send DingTalk reminders for delayed waiting tasks."""
     if not task_rows:
         return []
 
-    supervisor_names = supervisor_names or []
+    member_group_map = member_group_map or {}
+    group_supervisors = group_supervisors or {}
 
     assignee_tasks = {}
     for row in task_rows:
@@ -1256,7 +1280,8 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=N
         userid = get_userid_by_name(assignee)
         if userid:
             all_user_ids = [userid]
-            for sup_name in supervisor_names:
+            assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
+            for sup_name in assignee_supervisors:
                 if sup_name != assignee:
                     sup_userid = get_userid_by_name(sup_name)
                     if sup_userid:
@@ -1269,7 +1294,8 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=N
         # 回退到群机器人
         if not direct_sent:
             at_mobiles = [dingtalk_id]
-            for sup_name in supervisor_names:
+            assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
+            for sup_name in assignee_supervisors:
                 sup_dingtalk_id = dingtalk_map.get(sup_name, '')
                 if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
                     at_mobiles.append(sup_dingtalk_id)
@@ -1340,11 +1366,11 @@ def MonitorDelayedTasks():
     print(f"saved current delayed tasks: {current_delay_task_path}", flush=True)
 
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}, supervisors: {supervisor_names}", flush=True)
+        print(f"loaded dingtalk members: {len(dingtalk_map)}, group_supervisors: {group_supervisors}", flush=True)
 
-    sent_tasks = send_delay_task_dingtalk_message(rows, dingtalk_map, supervisor_names)
+    sent_tasks = send_delay_task_dingtalk_message(rows, dingtalk_map, member_group_map, group_supervisors)
     if sent_tasks:
         append_to_sendmsgbug(columns, sent_tasks, sendmsg_delay_task_path)
         print(f"saved delayed task reminders: {sendmsg_delay_task_path}", flush=True)
@@ -1395,12 +1421,13 @@ def query_overdue_deadline_tasks(conn):
     return columns, rows
 
 
-def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, supervisor_names=None):
+def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=None, group_supervisors=None):
     """Send DingTalk reminders for overdue deadline tasks."""
     if not task_rows:
         return []
 
-    supervisor_names = supervisor_names or []
+    member_group_map = member_group_map or {}
+    group_supervisors = group_supervisors or {}
 
     assignee_tasks = {}
     for row in task_rows:
@@ -1438,7 +1465,8 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, supervisor_name
         userid = get_userid_by_name(assignee)
         if userid:
             all_user_ids = [userid]
-            for sup_name in supervisor_names:
+            assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
+            for sup_name in assignee_supervisors:
                 if sup_name != assignee:
                     sup_userid = get_userid_by_name(sup_name)
                     if sup_userid:
@@ -1451,7 +1479,8 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, supervisor_name
         # 回退到群机器人
         if not direct_sent:
             at_mobiles = [dingtalk_id]
-            for sup_name in supervisor_names:
+            assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
+            for sup_name in assignee_supervisors:
                 sup_dingtalk_id = dingtalk_map.get(sup_name, '')
                 if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
                     at_mobiles.append(sup_dingtalk_id)
@@ -1523,11 +1552,11 @@ def MonitorDeadlineTasks():
     print(f"saved current deadline tasks: {current_deadline_task_path}", flush=True)
 
     dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, supervisor_names = load_dingtalk_member_map(dingtalk_mem_path)
+    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
     if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}, supervisors: {supervisor_names}", flush=True)
+        print(f"loaded dingtalk members: {len(dingtalk_map)}, group_supervisors: {group_supervisors}", flush=True)
 
-    sent_tasks = send_deadline_task_dingtalk_message(rows, dingtalk_map, supervisor_names)
+    sent_tasks = send_deadline_task_dingtalk_message(rows, dingtalk_map, member_group_map, group_supervisors)
     if sent_tasks:
         append_to_sendmsgbug(columns, sent_tasks, sendmsg_deadline_task_path)
         print(f"saved deadline task reminders: {sendmsg_deadline_task_path}", flush=True)
