@@ -29,10 +29,8 @@ import base64
 
 import sys
 
-# 添加项目根目录到路径，以便导入 dingtalk 模块
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
 try:
-    from dingtalk.dingtalk_client import DingTalkClient
+    from dingtalk_client import DingTalkClient
     _dingtalk_client = None
 
     def get_dingtalk_client():
@@ -325,7 +323,7 @@ DINGTALK_WEBHOOK_URL = (
     "https://oapi.dingtalk.com/robot/send"
     "?access_token=396a5f0855df4f121d2e6eda7270c6868bf6abcf9f7ee038c8cd2e88f0662570"
 )
-DINGTALK_SECRET = "SECbeaacac4ece00e63018fbed88a16e64be36a381cfa154c988a83d87a89324179"
+DINGTALK_SECRET = "SECbeaacac4ece00e63018fbed88a16e64be36a381cfa154c988a83d87a89324179-"
 
 
 def get_dingtalk_signed_url():
@@ -344,10 +342,11 @@ def get_dingtalk_signed_url():
 def load_dingtalk_member_map(filepath):
     """从dingtalk-mem.xlsx加载成员映射
     
-    Excel格式: 列1=姓名, 列2=钉钉号(手机号), 列3=职务, 列4=小组
+    Excel格式: 列1=姓名, 列2=钉钉号(userid), 列3=职务, 列4=小组(多个小组用逗号分隔)
+    加载时如果钉钉号为空，则通过API获取userid并填入保存。
     返回: (member_map, member_group_map, group_supervisors)
-        member_map: {姓名: 钉钉号}
-        member_group_map: {姓名: 小组名}
+        member_map: {姓名: 钉钉userid}
+        member_group_map: {姓名: [小组名列表]}
         group_supervisors: {小组名: [主管姓名列表]}
     """
     member_map = {}
@@ -359,31 +358,82 @@ def load_dingtalk_member_map(filepath):
     try:
         wb = openpyxl.load_workbook(filepath)
         ws = wb.active
+        need_save = False
         for row_idx in range(2, ws.max_row + 1):  # 跳过表头
             name = ws.cell(row=row_idx, column=1).value
             dingtalk_id = ws.cell(row=row_idx, column=2).value
             role = ws.cell(row=row_idx, column=3).value
             group = ws.cell(row=row_idx, column=4).value
-            if name and dingtalk_id:
-                name_str = str(name).strip()
-                member_map[name_str] = str(dingtalk_id).strip()
-                group_str = str(group).strip() if group else ''
-                if group_str:
-                    member_group_map[name_str] = group_str
-                if role and str(role).strip() == '主管' and group_str:
-                    group_supervisors.setdefault(group_str, []).append(name_str)
+            if not name:
+                continue
+            name_str = str(name).strip()
+            if not name_str:
+                continue
+            # 钉钉号为空时，获取userid并填入
+            if not dingtalk_id or not str(dingtalk_id).strip():
+                userid = get_userid_by_name(name_str)
+                if userid:
+                    dingtalk_id = userid
+                    ws.cell(row=row_idx, column=2, value=userid)
+                    need_save = True
+                    print(f"  [填充] {name_str} 的钉钉userid: {userid}", flush=True)
+                else:
+                    # 写入FAILED标记，避免每次运行都重复尝试
+                    ws.cell(row=row_idx, column=2, value="FAILED")
+                    need_save = True
+                    print(f"  [警告] 无法获取 {name_str} 的钉钉userid，已标记FAILED", flush=True)
+                    continue
+            if str(dingtalk_id).strip() == "FAILED":
+                continue
+            member_map[name_str] = str(dingtalk_id).strip()
+            group_str = str(group).strip() if group else ''
+            if group_str:
+                # 支持逗号分隔的多个小组
+                groups = [g.strip() for g in group_str.replace('，', ',').split(',') if g.strip()]
+                member_group_map[name_str] = groups
+                if role and str(role).strip() == '主管':
+                    for g in groups:
+                        group_supervisors.setdefault(g, []).append(name_str)
+            else:
+                member_group_map[name_str] = []
+        if need_save:
+            wb.save(filepath)
+            print(f"  [保存] dingtalk-mem.xlsx 已更新", flush=True)
         wb.close()
     except Exception as e:
         print(f"  [警告] 读取dingtalk-mem.xlsx失败: {e}", flush=True)
     return member_map, member_group_map, group_supervisors
 
 
+# 全局钉钉成员缓存，只加载一次
+_dingtalk_member_cache = None
+
+
+def get_dingtalk_members():
+    """获取钉钉成员映射（全局缓存，只加载一次）"""
+    global _dingtalk_member_cache
+    if _dingtalk_member_cache is None:
+        dingtalk_mem_path = os.path.join(get_app_dir(), 'dingtalk-mem.xlsx')
+        _dingtalk_member_cache = load_dingtalk_member_map(dingtalk_mem_path)
+        dingtalk_map, _, group_supervisors = _dingtalk_member_cache
+        if dingtalk_map:
+            print(f"  已加载钉钉成员映射: {len(dingtalk_map)} 人, 小组主管: {group_supervisors}", flush=True)
+    return _dingtalk_member_cache
+
+
 def get_supervisors_for_person(name, member_group_map, group_supervisors):
-    """获取某人所在小组的主管列表"""
-    group = member_group_map.get(name, '')
-    if not group:
+    """获取某人所在小组的主管列表（去重）"""
+    groups = member_group_map.get(name, [])
+    if not groups:
         return []
-    return group_supervisors.get(group, [])
+    supervisors = []
+    seen = set()
+    for group in groups:
+        for sup in group_supervisors.get(group, []):
+            if sup not in seen:
+                seen.add(sup)
+                supervisors.append(sup)
+    return supervisors
 
 
 def send_direct_message(user_ids, text):
@@ -469,14 +519,14 @@ def send_dingtalk_message(bug_rows, dingtalk_map, member_group_map=None, group_s
 
         # 尝试直接发送消息给userid
         direct_sent = False
-        userid = get_userid_by_name(resolver)
+        userid = dingtalk_map.get(resolver, '')
         if userid:
             # 收集所有需要发送的userid（解决人 + 对应小组主管）
             all_user_ids = [userid]
             resolver_supervisors = get_supervisors_for_person(resolver, member_group_map, group_supervisors)
             for sup_name in resolver_supervisors:
                 if sup_name != resolver:
-                    sup_userid = get_userid_by_name(sup_name)
+                    sup_userid = dingtalk_map.get(sup_name, '')
                     if sup_userid:
                         all_user_ids.append(sup_userid)
             direct_sent = send_direct_message(all_user_ids, text)
@@ -698,13 +748,13 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
 
         # 尝试直接发送
         direct_sent = False
-        userid = get_userid_by_name(assignee)
+        userid = dingtalk_map.get(assignee, '')
         if userid:
             all_user_ids = [userid]
             assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
             for sup_name in assignee_supervisors:
                 if sup_name != assignee:
-                    sup_userid = get_userid_by_name(sup_name)
+                    sup_userid = dingtalk_map.get(sup_name, '')
                     if sup_userid:
                         all_user_ids.append(sup_userid)
             direct_sent = send_direct_message(all_user_ids, text)
@@ -897,10 +947,7 @@ def MonitorBugs():
     print("=" * 60, flush=True)
 
     # 加载钉钉成员映射
-    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
-    if dingtalk_map:
-        print(f"  已加载钉钉成员映射: {len(dingtalk_map)} 人, 小组主管: {group_supervisors}", flush=True)
+    dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
 
     # 4a: 给解决人发送SVN未关联提醒（仅SVN未关联的RD bug）
     if not rd_bugs:
@@ -1031,13 +1078,13 @@ def send_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=None, g
 
         # 尝试直接发送
         direct_sent = False
-        userid = get_userid_by_name(finisher)
+        userid = dingtalk_map.get(finisher, '')
         if userid:
             all_user_ids = [userid]
             finisher_supervisors = get_supervisors_for_person(finisher, member_group_map, group_supervisors)
             for sup_name in finisher_supervisors:
                 if sup_name != finisher:
-                    sup_userid = get_userid_by_name(sup_name)
+                    sup_userid = dingtalk_map.get(sup_name, '')
                     if sup_userid:
                         all_user_ids.append(sup_userid)
             direct_sent = send_direct_message(all_user_ids, text)
@@ -1117,10 +1164,7 @@ def MonitorTasks():
     generate_excel(columns[:-1], [row[:-1] for row in rows], currenttask_path)
     print(f"saved current tasks: {currenttask_path}", flush=True)
 
-    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
-    if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}, group_supervisors: {group_supervisors}", flush=True)
+    dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
 
     sent_tasks = send_task_dingtalk_message(rows, dingtalk_map, member_group_map, group_supervisors)
     if sent_tasks:
@@ -1169,8 +1213,8 @@ def load_sent_record_time_map(filepath, id_col=1, sent_time_col=None):
 
 def query_delayed_waiting_tasks(conn):
     """Query tasks whose estimated start date is overdue by more than one day and still waiting."""
-    one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    one_day_ago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    one_month_ago = (datetime.now() - timedelta(days=30)).date()
+    one_day_ago = (datetime.now() - timedelta(days=1)).date()
 
     sql = """
     SELECT
@@ -1203,6 +1247,8 @@ def query_delayed_waiting_tasks(conn):
     )
 
     cursor = conn.cursor()
+    final_sql = sql.replace('%s', "'%s'") % (one_month_ago, one_day_ago)
+    print(f"delay task final sql:\n{final_sql.strip()}", flush=True)
     cursor.execute(sql, (one_month_ago, one_day_ago))
     columns = [desc[0] for desc in cursor.description]
     rows = cursor.fetchall()
@@ -1277,13 +1323,13 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=N
 
         # 尝试直接发送
         direct_sent = False
-        userid = get_userid_by_name(assignee)
+        userid = dingtalk_map.get(assignee, '')
         if userid:
             all_user_ids = [userid]
             assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
             for sup_name in assignee_supervisors:
                 if sup_name != assignee:
-                    sup_userid = get_userid_by_name(sup_name)
+                    sup_userid = dingtalk_map.get(sup_name, '')
                     if sup_userid:
                         all_user_ids.append(sup_userid)
             direct_sent = send_direct_message(all_user_ids, text)
@@ -1365,10 +1411,7 @@ def MonitorDelayedTasks():
     generate_excel(columns[:-1], [row[:-1] for row in rows], current_delay_task_path)
     print(f"saved current delayed tasks: {current_delay_task_path}", flush=True)
 
-    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
-    if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}, group_supervisors: {group_supervisors}", flush=True)
+    dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
 
     sent_tasks = send_delay_task_dingtalk_message(rows, dingtalk_map, member_group_map, group_supervisors)
     if sent_tasks:
@@ -1378,8 +1421,8 @@ def MonitorDelayedTasks():
 
 def query_overdue_deadline_tasks(conn):
     """Query tasks whose deadline is overdue by more than one day, estStarted is within one month, and status is wait/doing."""
-    one_month_ago = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
-    one_day_ago = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
+    one_month_ago = (datetime.now() - timedelta(days=30)).date()
+    one_day_ago = (datetime.now() - timedelta(days=1)).date()
 
     sql = """
     SELECT
@@ -1462,13 +1505,13 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, member_group_ma
 
         # 尝试直接发送
         direct_sent = False
-        userid = get_userid_by_name(assignee)
+        userid = dingtalk_map.get(assignee, '')
         if userid:
             all_user_ids = [userid]
             assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
             for sup_name in assignee_supervisors:
                 if sup_name != assignee:
-                    sup_userid = get_userid_by_name(sup_name)
+                    sup_userid = dingtalk_map.get(sup_name, '')
                     if sup_userid:
                         all_user_ids.append(sup_userid)
             direct_sent = send_direct_message(all_user_ids, text)
@@ -1551,10 +1594,7 @@ def MonitorDeadlineTasks():
     generate_excel(columns[:-1], [row[:-1] for row in rows], current_deadline_task_path)
     print(f"saved current deadline tasks: {current_deadline_task_path}", flush=True)
 
-    dingtalk_mem_path = os.path.join(output_dir, 'dingtalk-mem.xlsx')
-    dingtalk_map, member_group_map, group_supervisors = load_dingtalk_member_map(dingtalk_mem_path)
-    if dingtalk_map:
-        print(f"loaded dingtalk members: {len(dingtalk_map)}, group_supervisors: {group_supervisors}", flush=True)
+    dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
 
     sent_tasks = send_deadline_task_dingtalk_message(rows, dingtalk_map, member_group_map, group_supervisors)
     if sent_tasks:
