@@ -323,7 +323,7 @@ DINGTALK_WEBHOOK_URL = (
     "https://oapi.dingtalk.com/robot/send"
     "?access_token=396a5f0855df4f121d2e6eda7270c6868bf6abcf9f7ee038c8cd2e88f0662570"
 )
-DINGTALK_SECRET = "SECbeaacac4ece00e63018fbed88a16e64be36a381cfa154c988a83d87a89324179-"
+DINGTALK_SECRET = "SECbeaacac4ece00e63018fbed88a16e64be36a381cfa154c988a83d87a89324179"
 
 
 def get_dingtalk_signed_url():
@@ -436,6 +436,26 @@ def get_supervisors_for_person(name, member_group_map, group_supervisors):
     return supervisors
 
 
+def log_dingtalk_send(recipients, content, method="direct"):
+    """记录钉钉发送记录到 dingtalk-send-log.xlsx"""
+    log_path = os.path.join(get_app_dir(), 'dingtalk-send-log.xlsx')
+    now_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    recipients_str = ', '.join(recipients) if isinstance(recipients, (list, tuple)) else str(recipients)
+    try:
+        if os.path.exists(log_path):
+            wb = openpyxl.load_workbook(log_path)
+            ws = wb.active
+        else:
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.append(['发送时间', '接收人', '发送方式', '内容'])
+        ws.append([now_str, recipients_str, method, content])
+        wb.save(log_path)
+        wb.close()
+    except Exception as e:
+        print(f"  [警告] 记录发送日志失败: {e}", flush=True)
+
+
 def send_direct_message(user_ids, text):
     """通过DingTalkClient直接发送消息给用户，成功返回True"""
     client = get_dingtalk_client()
@@ -532,6 +552,7 @@ def send_dingtalk_message(bug_rows, dingtalk_map, member_group_map=None, group_s
             direct_sent = send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  直接消息发送成功 → {resolver} ({len(bugs)} 个bug)", flush=True)
+                log_dingtalk_send(resolver, text, "direct")
                 sent_bugs.extend(bugs)
 
         # 直接发送失败，回退到群机器人
@@ -571,6 +592,7 @@ def send_dingtalk_message(bug_rows, dingtalk_map, member_group_map=None, group_s
                     result = json.loads(resp.read().decode('utf-8'))
                     if result.get('errcode') == 0:
                         print(f"  群机器人消息发送成功 → {resolver} ({len(bugs)} 个bug)", flush=True)
+                        log_dingtalk_send(resolver, text, "robot")
                         sent_bugs.extend(bugs)
                     else:
                         print(f"  群机器人消息发送失败 → {resolver}: {result.get('errmsg')}", flush=True)
@@ -760,6 +782,7 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
             direct_sent = send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  指派通知直接发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
+                log_dingtalk_send(assignee, text, "direct")
                 sent_bugs.extend(bugs)
 
         # 回退到群机器人
@@ -1090,6 +1113,7 @@ def send_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=None, g
             direct_sent = send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  直接消息发送成功 → {finisher} ({len(tasks)} tasks)", flush=True)
+                log_dingtalk_send(finisher, text, "direct")
                 sent_tasks.extend(tasks)
 
         # 回退到群机器人
@@ -1122,6 +1146,7 @@ def send_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=None, g
                     result = json.loads(resp.read().decode('utf-8'))
                     if result.get('errcode') == 0:
                         print(f"  群机器人消息发送成功 → {finisher} ({len(tasks)} tasks)", flush=True)
+                        log_dingtalk_send(finisher, text, "robot")
                         sent_tasks.extend(tasks)
                     else:
                         print(f"  task reminder failed -> {finisher}: {result.get('errmsg')}", flush=True)
@@ -1335,6 +1360,7 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=N
             direct_sent = send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  直接消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                log_dingtalk_send(assignee, text, "direct")
                 sent_tasks.extend(tasks)
 
         # 回退到群机器人
@@ -1367,6 +1393,7 @@ def send_delay_task_dingtalk_message(task_rows, dingtalk_map, member_group_map=N
                     result = json.loads(resp.read().decode('utf-8'))
                     if result.get('errcode') == 0:
                         print(f"  群机器人消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                        log_dingtalk_send(assignee, text, "robot")
                         sent_tasks.extend(tasks)
                     else:
                         print(f"  delay task reminder failed -> {assignee}: {result.get('errmsg')}", flush=True)
@@ -1517,6 +1544,7 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, member_group_ma
             direct_sent = send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  直接消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                log_dingtalk_send(assignee, text, "direct")
                 sent_tasks.extend(tasks)
 
         # 回退到群机器人
@@ -1549,6 +1577,7 @@ def send_deadline_task_dingtalk_message(task_rows, dingtalk_map, member_group_ma
                     result = json.loads(resp.read().decode('utf-8'))
                     if result.get('errcode') == 0:
                         print(f"  群机器人消息发送成功 → {assignee} ({len(tasks)} tasks)", flush=True)
+                        log_dingtalk_send(assignee, text, "robot")
                         sent_tasks.extend(tasks)
                     else:
                         sent_tasks.extend(tasks)
