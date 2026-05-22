@@ -351,9 +351,14 @@ def get_opened_count(row):
         return 0
 
 
+def is_multi_open_bug(row):
+    """多次打开的bug。"""
+    return get_opened_count(row) >= 2
+
+
 def is_multi_open_dev_bug(row):
     """多次打开且当前指派给开发人员的bug。"""
-    return is_dev_role(get_row_value(row, COL_ASSIGNEE_ROLE)) and get_opened_count(row) >= 2
+    return is_dev_role(get_row_value(row, COL_ASSIGNEE_ROLE)) and is_multi_open_bug(row)
 
 
 def filter_test_assigned_bugs(bug_rows):
@@ -788,7 +793,7 @@ def append_to_sent_assignee_records(sent_rows, filepath):
         ws.cell(
             row=row_idx,
             column=8,
-            value='多次打开质量提醒' if is_multi_open_dev_bug(row) else '普通指派通知'
+            value='多次打开质量提醒' if is_multi_open_bug(row) else '普通指派通知'
         )
 
     wb.save(filepath)
@@ -849,9 +854,7 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
             print(f"  [跳过指派通知] {assignee} 不在dingtalk-mem.xlsx中", flush=True)
             continue
 
-        quality_bug_lines = []
-        normal_bug_lines = []
-        for row in bugs:
+        def format_assignee_bug_line(row):
             bug_id = row[COL_BUG_ID]
             title = row[COL_TITLE]
             product = row[COL_PRODUCT] or ''
@@ -867,57 +870,43 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
                 f"(优先级: {pri}, 严重程度: {severity}, 打开次数: {opened_count}, "
                 f"指派时间: {assigned_date}{assigner_text})"
             )
-            if is_multi_open_dev_bug(row):
-                quality_bug_lines.append(line)
-            else:
-                normal_bug_lines.append(line)
+            return line
 
-        if quality_bug_lines and not normal_bug_lines:
-            text = (
-                f"@{assignee} 多次打开Bug质量提醒：以下bug已再次指派给你。"
-                "请重点关注开发质量，修复后做好自测试，再提交测试验证。\n\n"
-                + "\n".join(quality_bug_lines)
-            )
-        elif quality_bug_lines:
-            text = (
-                f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理。\n\n"
-                "【多次打开Bug】\n"
-                + "\n".join(quality_bug_lines)
-                + "\n\n请重点关注以上多次打开bug的开发质量，修复后做好自测试，再提交测试验证。\n\n"
-                "【其他Bug】\n"
-                + "\n".join(normal_bug_lines)
-            )
-        else:
-            text = (
-                f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理：\n\n"
-                + "\n".join(normal_bug_lines)
-            )
-
-        # 尝试直接发送
-        direct_sent = False
-        userid = dingtalk_map.get(assignee, '')
-        if userid:
-            all_user_ids = [userid]
+        def append_supervisor_users(user_ids):
             assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
             for sup_name in assignee_supervisors:
                 if sup_name != assignee:
                     sup_userid = dingtalk_map.get(sup_name, '')
-                    if sup_userid:
-                        all_user_ids.append(sup_userid)
-            direct_sent = send_direct_message(all_user_ids, text)
-            if direct_sent:
-                print(f"  指派通知直接发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
-                log_dingtalk_send(assignee, text, "direct")
-                sent_bugs.extend(bugs)
+                    if sup_userid and sup_userid not in user_ids:
+                        user_ids.append(sup_userid)
 
-        # 回退到群机器人
-        if not direct_sent:
-            at_mobiles = [dingtalk_id]
+        def append_supervisor_mobiles(at_mobiles):
             assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
             for sup_name in assignee_supervisors:
                 sup_dingtalk_id = dingtalk_map.get(sup_name, '')
                 if sup_dingtalk_id and sup_dingtalk_id not in at_mobiles:
                     at_mobiles.append(sup_dingtalk_id)
+
+        def send_assignment_batch(batch_bugs, text, include_supervisors):
+            # 打开次数>=2的质量提醒才发给主管；普通指派只发被指派人。
+            direct_sent = False
+            userid = dingtalk_map.get(assignee, '')
+            if userid:
+                all_user_ids = [userid]
+                if include_supervisors:
+                    append_supervisor_users(all_user_ids)
+                direct_sent = send_direct_message(all_user_ids, text)
+                if direct_sent:
+                    print(f"  指派通知直接发送成功 → {assignee} ({len(batch_bugs)} 个bug)", flush=True)
+                    log_dingtalk_send(assignee, text, "direct")
+                    sent_bugs.extend(batch_bugs)
+
+            if direct_sent:
+                return
+
+            at_mobiles = [dingtalk_id]
+            if include_supervisors:
+                append_supervisor_mobiles(at_mobiles)
 
             payload = {
                 "msgtype": "text",
@@ -939,13 +928,33 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
                 with urllib.request.urlopen(req, timeout=10) as resp:
                     result = json.loads(resp.read().decode('utf-8'))
                     if result.get('errcode') == 0:
-                        print(f"  指派通知群机器人发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
+                        print(f"  指派通知群机器人发送成功 → {assignee} ({len(batch_bugs)} 个bug)", flush=True)
                         log_dingtalk_send(assignee, text, "robot")
-                        sent_bugs.extend(bugs)
+                        sent_bugs.extend(batch_bugs)
                     else:
                         print(f"  指派通知发送失败 → {assignee}: {result.get('errmsg')}", flush=True)
             except Exception as e:
                 print(f"  指派通知发送异常 → {assignee}: {e}", flush=True)
+
+        quality_bugs = [row for row in bugs if is_multi_open_bug(row)]
+        normal_bugs = [row for row in bugs if not is_multi_open_bug(row)]
+
+        if quality_bugs:
+            quality_bug_lines = [format_assignee_bug_line(row) for row in quality_bugs]
+            text = (
+                f"@{assignee} 多次打开Bug质量提醒：以下bug已再次指派给你。"
+                "请重点关注开发质量，修复后做好自测试，再提交测试验证。\n\n"
+                + "\n".join(quality_bug_lines)
+            )
+            send_assignment_batch(quality_bugs, text, include_supervisors=True)
+
+        if normal_bugs:
+            normal_bug_lines = [format_assignee_bug_line(row) for row in normal_bugs]
+            text = (
+                f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理：\n\n"
+                + "\n".join(normal_bug_lines)
+            )
+            send_assignment_batch(normal_bugs, text, include_supervisors=False)
 
     # 记录已发送
     if sent_bugs and record_filepath:
