@@ -131,8 +131,10 @@ COL_ASSIGNER_ROLE = 19  # 指派人职位
 COL_ASSIGN_ACTION = 20  # 指派动作
 COL_OPENER_ROLE = 21    # 创建人职位
 COL_ASSIGNEE_ROLE = 22  # 当前负责人职位
+COL_OPENED_COUNT = 23   # zt_action 中 action=opened 的次数
 
 TEST_ASSIGNER_ROLES = {'qa', 'qd', 'sqa', 'test', 'tester'}
+DEV_ASSIGNEE_ROLES = {'dev'}
 
 # 解决方案取值映射
 RESOLUTION_MAP = {
@@ -334,6 +336,24 @@ def get_row_value(row, index, default=''):
 def is_test_role(role):
     """判断禅道用户角色是否属于测试侧。"""
     return str(role or '').strip().lower() in TEST_ASSIGNER_ROLES
+
+
+def is_dev_role(role):
+    """判断禅道用户角色是否属于开发侧。"""
+    return str(role or '').strip().lower() in DEV_ASSIGNEE_ROLES
+
+
+def get_opened_count(row):
+    """获取bug被打开次数，无法解析时按0处理。"""
+    try:
+        return int(get_row_value(row, COL_OPENED_COUNT, 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def is_multi_open_dev_bug(row):
+    """多次打开且当前指派给开发人员的bug。"""
+    return is_dev_role(get_row_value(row, COL_ASSIGNEE_ROLE)) and get_opened_count(row) >= 2
 
 
 def filter_test_assigned_bugs(bug_rows):
@@ -673,7 +693,14 @@ def query_recently_assigned_bugs(conn):
         assigner.role     AS '指派人职位',
         assign_action.action AS '指派动作',
         opener.role       AS '创建人职位',
-        assignee.role     AS '当前负责人职位'
+        assignee.role     AS '当前负责人职位',
+        (
+            SELECT COUNT(*)
+            FROM zt_action opened_action
+            WHERE opened_action.objectType = 'bug'
+              AND opened_action.objectID = b.id
+              AND opened_action.action = 'opened'
+        ) AS '打开次数'
     FROM zt_bug b
     LEFT JOIN zt_product p   ON b.product = p.id
     LEFT JOIN zt_project pj  ON b.project = pj.id
@@ -728,20 +755,23 @@ def load_sent_assignee_records(filepath):
 def append_to_sent_assignee_records(sent_rows, filepath):
     """将发送成功的指派通知记录追加到文件
     
-    格式: Bug编号 | 指派时间 | 被指派人 | Bug标题 | 解决人 | 通知发送时间
+    格式: Bug编号 | 指派时间 | 被指派人 | Bug标题 | 解决人 | 通知发送时间 | 打开次数 | 通知类型
     """
     if not sent_rows:
         return
 
+    headers = ['Bug编号', '指派时间', '被指派人', 'Bug标题', '解决人', '通知发送时间', '打开次数', '通知类型']
     if os.path.exists(filepath):
         wb = openpyxl.load_workbook(filepath)
         ws = wb.active
+        for col_idx, h in enumerate(headers, 1):
+            if not ws.cell(row=1, column=col_idx).value:
+                ws.cell(row=1, column=col_idx, value=h)
         start_row = ws.max_row + 1
     else:
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "指派通知记录"
-        headers = ['Bug编号', '指派时间', '被指派人', 'Bug标题', '解决人', '通知发送时间']
         for col_idx, h in enumerate(headers, 1):
             ws.cell(row=1, column=col_idx, value=h)
         start_row = 2
@@ -754,6 +784,12 @@ def append_to_sent_assignee_records(sent_rows, filepath):
         ws.cell(row=row_idx, column=4, value=str(row[COL_TITLE] or ''))
         ws.cell(row=row_idx, column=5, value=str(row[COL_RESOLVER] or ''))
         ws.cell(row=row_idx, column=6, value=now_str)
+        ws.cell(row=row_idx, column=7, value=get_opened_count(row))
+        ws.cell(
+            row=row_idx,
+            column=8,
+            value='多次打开质量提醒' if is_multi_open_dev_bug(row) else '普通指派通知'
+        )
 
     wb.save(filepath)
 
@@ -813,7 +849,8 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
             print(f"  [跳过指派通知] {assignee} 不在dingtalk-mem.xlsx中", flush=True)
             continue
 
-        bug_lines = []
+        quality_bug_lines = []
+        normal_bug_lines = []
         for row in bugs:
             bug_id = row[COL_BUG_ID]
             title = row[COL_TITLE]
@@ -824,15 +861,37 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
             assigned_date = str(row[COL_ASSIGNED_DATE] or '')
             assigner = str(get_row_value(row, COL_ASSIGNER) or row[COL_OPENER] or '').strip()
             assigner_text = f", 指派人: {assigner}" if assigner else ''
-            bug_lines.append(
+            opened_count = get_opened_count(row)
+            line = (
                 f"  - Bug#{bug_id} [{product}/{project}] {title} "
-                f"(优先级: {pri}, 严重程度: {severity}, 指派时间: {assigned_date}{assigner_text})"
+                f"(优先级: {pri}, 严重程度: {severity}, 打开次数: {opened_count}, "
+                f"指派时间: {assigned_date}{assigner_text})"
             )
+            if is_multi_open_dev_bug(row):
+                quality_bug_lines.append(line)
+            else:
+                normal_bug_lines.append(line)
 
-        text = (
-            f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理：\n\n"
-            + "\n".join(bug_lines)
-        )
+        if quality_bug_lines and not normal_bug_lines:
+            text = (
+                f"@{assignee} 多次打开Bug质量提醒：以下bug已再次指派给你。"
+                "请重点关注开发质量，修复后做好自测试，再提交测试验证。\n\n"
+                + "\n".join(quality_bug_lines)
+            )
+        elif quality_bug_lines:
+            text = (
+                f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理。\n\n"
+                "【多次打开Bug】\n"
+                + "\n".join(quality_bug_lines)
+                + "\n\n请重点关注以上多次打开bug的开发质量，修复后做好自测试，再提交测试验证。\n\n"
+                "【其他Bug】\n"
+                + "\n".join(normal_bug_lines)
+            )
+        else:
+            text = (
+                f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理：\n\n"
+                + "\n".join(normal_bug_lines)
+            )
 
         # 尝试直接发送
         direct_sent = False
