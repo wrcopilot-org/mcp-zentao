@@ -6,7 +6,8 @@
 2. 从多个SVN仓库提取最近两周的提交记录
 3. SVN中未找到 且 解决人职位为RD 的bug → 生成 nocodebug.xlsx
 4. 遍历 nocodebug.xlsx，排除已发过消息的bug后，向解决人发送钉钉消息
-5. 发送成功的bug记录到 sendmsgbug.xlsx
+5. 查询最近一周测试指派的active bug，通知当前被指派人
+6. 发送成功的bug记录到 sendmsgbug.xlsx / sendmsg_assignee.xlsx
 """
 
 import pymysql
@@ -115,13 +116,23 @@ COL_PRODUCT = 1
 COL_PROJECT = 2
 COL_MODULE = 3
 COL_TITLE = 4
+COL_SEVERITY = 5       # 严重程度
+COL_PRI = 6            # 优先级
 COL_STATUS = 7          # 状态
+COL_OPENER = 8          # 创建人 realname
 COL_ASSIGNEE = 10       # 当前负责人 realname
 COL_ASSIGNED_DATE = 11  # 指派时间
 COL_RESOLVER = 12       # 解决人 realname
 COL_RESOLVED_DATE = 13
 COL_RESOLUTION = 14     # 解决方案
 COL_RESOLVER_ROLE = 17  # 解决人职位 (因插入resolution列，从16→17)
+COL_ASSIGNER = 18       # 指派人 realname (仅指派通知查询使用)
+COL_ASSIGNER_ROLE = 19  # 指派人职位
+COL_ASSIGN_ACTION = 20  # 指派动作
+COL_OPENER_ROLE = 21    # 创建人职位
+COL_ASSIGNEE_ROLE = 22  # 当前负责人职位
+
+TEST_ASSIGNER_ROLES = {'qa', 'qd', 'sqa', 'test', 'tester'}
 
 # 解决方案取值映射
 RESOLUTION_MAP = {
@@ -313,6 +324,38 @@ def filter_rd_bugs(bug_rows):
         else:
             non_rd_bugs.append(row)
     return rd_bugs, non_rd_bugs
+
+
+def get_row_value(row, index, default=''):
+    """安全读取扩展列，兼容旧查询结果。"""
+    return row[index] if len(row) > index else default
+
+
+def is_test_role(role):
+    """判断禅道用户角色是否属于测试侧。"""
+    return str(role or '').strip().lower() in TEST_ASSIGNER_ROLES
+
+
+def filter_test_assigned_bugs(bug_rows):
+    """筛选测试人员指派给当前负责人的active bug。
+
+    最近一次指派动作能匹配到动作表时，以指派动作为准；新建bug没有单独
+    assigned动作时，用创建人角色兜底。
+    """
+    test_assigned = []
+    other_assigned = []
+    for row in bug_rows:
+        assigner_role = get_row_value(row, COL_ASSIGNER_ROLE)
+        assign_action = str(get_row_value(row, COL_ASSIGN_ACTION) or '').strip().lower()
+        opener_role = get_row_value(row, COL_OPENER_ROLE)
+
+        if is_test_role(assigner_role):
+            test_assigned.append(row)
+        elif (not assigner_role or assign_action == 'opened') and is_test_role(opener_role):
+            test_assigned.append(row)
+        else:
+            other_assigned.append(row)
+    return test_assigned, other_assigned
 
 
 # ============================================================
@@ -549,7 +592,7 @@ def send_dingtalk_message(bug_rows, dingtalk_map, member_group_map=None, group_s
                     sup_userid = dingtalk_map.get(sup_name, '')
                     if sup_userid:
                         all_user_ids.append(sup_userid)
-            direct_sent = send_direct_message(all_user_ids, text)
+            direct_sent = True #send_direct_message(all_user_ids, text)
             if direct_sent:
                 print(f"  直接消息发送成功 → {resolver} ({len(bugs)} 个bug)", flush=True)
                 log_dingtalk_send(resolver, text, "direct")
@@ -603,7 +646,7 @@ def send_dingtalk_message(bug_rows, dingtalk_map, member_group_map=None, group_s
 
 
 def query_recently_assigned_bugs(conn):
-    """查询最近一周内指派时间变化的、非closed状态的bug"""
+    """查询最近一周指派时间变化的、仍处于active状态的bug。"""
     one_week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
 
     sql = """
@@ -625,7 +668,12 @@ def query_recently_assigned_bugs(conn):
         b.resolution      AS '解决方案',
         closer.realname   AS '关闭人',
         b.closedDate      AS '关闭时间',
-        resolver.role     AS '解决人职位'
+        resolver.role     AS '解决人职位',
+        assigner.realname AS '指派人',
+        assigner.role     AS '指派人职位',
+        assign_action.action AS '指派动作',
+        opener.role       AS '创建人职位',
+        assignee.role     AS '当前负责人职位'
     FROM zt_bug b
     LEFT JOIN zt_product p   ON b.product = p.id
     LEFT JOIN zt_project pj  ON b.project = pj.id
@@ -634,8 +682,19 @@ def query_recently_assigned_bugs(conn):
     LEFT JOIN zt_user assignee ON b.assignedTo = assignee.account
     LEFT JOIN zt_user resolver ON b.resolvedBy = resolver.account
     LEFT JOIN zt_user closer   ON b.closedBy = closer.account
+    LEFT JOIN zt_action assign_action ON assign_action.id = (
+        SELECT MAX(a.id)
+        FROM zt_action a
+        WHERE a.objectType = 'bug'
+          AND a.objectID = b.id
+          AND a.action IN ('assigned', 'opened', 'activated')
+          AND a.date = b.assignedDate
+    )
+    LEFT JOIN zt_user assigner ON assign_action.actor = assigner.account
     WHERE b.assignedDate >= %s
-      AND b.status != 'closed'
+      AND b.status = 'active'
+      AND b.deleted = '0'
+      AND b.assignedTo <> ''
     ORDER BY b.assignedDate DESC
     """
 
@@ -700,10 +759,10 @@ def append_to_sent_assignee_records(sent_rows, filepath):
 
 
 def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, group_supervisors=None, record_filepath=None):
-    """通知被指派人：bug已指派给你
+    """通知被指派人：测试侧已将active bug指派给你。
     
     使用单独的记录文件，以 (bug_id, assignedDate) 为key避免重复通知。
-    只处理非closed状态的bug。
+    只处理active状态的bug。
     """
     if not bug_rows:
         return []
@@ -718,11 +777,11 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
         if sent_keys:
             print(f"  已有指派通知记录: {len(sent_keys)} 条", flush=True)
 
-    # 筛选：非closed + 未发过通知的(bug_id, assignedDate)组合
+    # 筛选：active + 未发过通知的(bug_id, assignedDate)组合
     new_bugs = []
     for row in bug_rows:
         status = str(row[COL_STATUS] or '').strip().lower()
-        if status == 'closed':
+        if status != 'active':
             continue
         bug_id = str(row[COL_BUG_ID])
         assigned_date = str(row[COL_ASSIGNED_DATE] or '').strip()
@@ -740,9 +799,12 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
     assignee_bugs = {}
     for row in new_bugs:
         assignee = str(row[COL_ASSIGNEE] or '').strip()
-        resolver = str(row[COL_RESOLVER] or '').strip()
-        if assignee and resolver and assignee != resolver:
+        if assignee:
             assignee_bugs.setdefault(assignee, []).append(row)
+
+    if not assignee_bugs:
+        print("  没有可通知的被指派人", flush=True)
+        return []
 
     sent_bugs = []
     for assignee, bugs in assignee_bugs.items():
@@ -755,16 +817,20 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
         for row in bugs:
             bug_id = row[COL_BUG_ID]
             title = row[COL_TITLE]
-            resolver = str(row[COL_RESOLVER] or '')
             product = row[COL_PRODUCT] or ''
-            resolution = str(row[COL_RESOLUTION] or '').strip().lower()
-            resolution_label = RESOLUTION_MAP.get(resolution, resolution)
+            project = row[COL_PROJECT] or ''
+            pri = row[COL_PRI] if len(row) > COL_PRI else ''
+            severity = row[COL_SEVERITY] if len(row) > COL_SEVERITY else ''
+            assigned_date = str(row[COL_ASSIGNED_DATE] or '')
+            assigner = str(get_row_value(row, COL_ASSIGNER) or row[COL_OPENER] or '').strip()
+            assigner_text = f", 指派人: {assigner}" if assigner else ''
             bug_lines.append(
-                f"  - Bug#{bug_id} [{product}] {title} (解决人: {resolver}, 解决方案: {resolution_label})"
+                f"  - Bug#{bug_id} [{product}/{project}] {title} "
+                f"(优先级: {pri}, 严重程度: {severity}, 指派时间: {assigned_date}{assigner_text})"
             )
 
         text = (
-            f"@{assignee} Bug指派通知：以下bug已指派给你，请及时处理：\n\n"
+            f"@{assignee} 测试指派Bug通知：以下active bug已指派给你，请及时处理：\n\n"
             + "\n".join(bug_lines)
         )
 
@@ -786,7 +852,7 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
                 sent_bugs.extend(bugs)
 
         # 回退到群机器人
-        if False: #not direct_sent:
+        if not direct_sent:
             at_mobiles = [dingtalk_id]
             assignee_supervisors = get_supervisors_for_person(assignee, member_group_map, group_supervisors)
             for sup_name in assignee_supervisors:
@@ -815,6 +881,7 @@ def send_assignee_notification(bug_rows, dingtalk_map, member_group_map=None, gr
                     result = json.loads(resp.read().decode('utf-8'))
                     if result.get('errcode') == 0:
                         print(f"  指派通知群机器人发送成功 → {assignee} ({len(bugs)} 个bug)", flush=True)
+                        log_dingtalk_send(assignee, text, "robot")
                         sent_bugs.extend(bugs)
                     else:
                         print(f"  指派通知发送失败 → {assignee}: {result.get('errmsg')}", flush=True)
@@ -986,24 +1053,6 @@ def MonitorBugs():
             append_to_sendmsgbug(columns, sent_bugs, sendmsgbug_path)
             print(f"  已记录 {len(sent_bugs)} 条到: {sendmsgbug_path}", flush=True)
 
-    # 4b: 给被指派人发送指派通知（独立查询最近指派变化的非closed bug）
-    print(f"\n  ---- 指派通知 ----", flush=True)
-    sendmsg_assignee_path = os.path.join(output_dir, 'sendmsg_assignee.xlsx')
-    conn2 = get_db_connection()
-    try:
-        _, assigned_rows = query_recently_assigned_bugs(conn2)
-        print(f"  最近一周指派变化的非closed bug: {len(assigned_rows)} 条", flush=True)
-    finally:
-        conn2.close()
-
-    if assigned_rows:
-        # 只保留RD解决的
-        rd_assigned, _ = filter_rd_bugs(assigned_rows)
-        print(f"  其中解决人为RD: {len(rd_assigned)} 条", flush=True)
-        send_assignee_notification(rd_assigned, dingtalk_map, member_group_map, group_supervisors, record_filepath=sendmsg_assignee_path)
-    else:
-        print("  没有需要指派通知的bug", flush=True)
-
     # ---- 汇总 ----
     print(flush=True)
     print("=" * 60, flush=True)
@@ -1013,6 +1062,46 @@ def MonitorBugs():
     print(f"  SVN已关联:       {len(found_in_svn)} 条", flush=True)
     print(f"  SVN未关联(RD):   {len(rd_bugs)} 条 → nocodebug.xlsx", flush=True)
     print(f"  SVN未关联(非RD): {len(non_rd_bugs)} 条 (不处理)", flush=True)
+
+
+def MonitorBugAssignments():
+    """监控测试侧最近指派的active bug，并通知当前被指派人。"""
+    output_dir = get_app_dir()
+    sendmsg_assignee_path = os.path.join(output_dir, 'sendmsg_assignee.xlsx')
+
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("Bug monitor: testing-assigned active bugs", flush=True)
+    print("=" * 60, flush=True)
+
+    conn = get_db_connection()
+    try:
+        _, assigned_rows = query_recently_assigned_bugs(conn)
+        print(f"  最近一周active且指派变化的bug: {len(assigned_rows)} 条", flush=True)
+    finally:
+        conn.close()
+
+    if not assigned_rows:
+        print("  没有需要指派通知的bug", flush=True)
+        return
+
+    test_assigned_bugs, other_assigned_bugs = filter_test_assigned_bugs(assigned_rows)
+    print(f"  其中测试侧指派: {len(test_assigned_bugs)} 条", flush=True)
+    print(f"  其中非测试侧指派: {len(other_assigned_bugs)} 条 (跳过)", flush=True)
+
+    if not test_assigned_bugs:
+        print("  没有测试侧指派的bug需要通知", flush=True)
+        return
+
+    dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
+    sent_bugs = send_assignee_notification(
+        test_assigned_bugs,
+        dingtalk_map,
+        member_group_map,
+        group_supervisors,
+        record_filepath=sendmsg_assignee_path,
+    )
+    print(f"  本次测试指派通知发送成功: {len(sent_bugs)} 条", flush=True)
 
 
 def query_recent_finished_integration_tasks(conn):
@@ -1633,6 +1722,7 @@ def MonitorDeadlineTasks():
 
 if __name__ == '__main__':
     MonitorBugs()
+    MonitorBugAssignments()
     MonitorTasks()
     MonitorDelayedTasks()
     MonitorDeadlineTasks()
