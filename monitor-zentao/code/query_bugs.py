@@ -1155,21 +1155,23 @@ def MonitorBugAssignments():
 
     test_assigned_bugs, other_assigned_bugs = filter_test_assigned_bugs(assigned_rows)
     print(f"  其中测试侧指派: {len(test_assigned_bugs)} 条", flush=True)
-    print(f"  其中非测试侧指派: {len(other_assigned_bugs)} 条 (跳过)", flush=True)
+    print(f"  其中非测试侧指派: {len(other_assigned_bugs)} 条", flush=True)
 
-    if not test_assigned_bugs:
-        print("  没有测试侧指派的bug需要通知", flush=True)
+    # 所有active bug都发送通知，不限于测试侧指派
+    all_bugs_to_notify = assigned_rows
+    if not all_bugs_to_notify:
+        print("  没有需要通知的bug", flush=True)
         return
 
     dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
     sent_bugs = send_assignee_notification(
-        test_assigned_bugs,
+        all_bugs_to_notify,
         dingtalk_map,
         member_group_map,
         group_supervisors,
         record_filepath=sendmsg_assignee_path,
     )
-    print(f"  本次测试指派通知发送成功: {len(sent_bugs)} 条", flush=True)
+    print(f"  本次指派通知发送成功: {len(sent_bugs)} 条", flush=True)
 
 
 def query_recent_finished_integration_tasks(conn):
@@ -1788,9 +1790,479 @@ def MonitorDeadlineTasks():
         print(f"saved deadline task reminders: {sendmsg_deadline_task_path}", flush=True)
 
 
+def load_project_report_config(filepath):
+    """从project-report.xlsx加载要统计的项目列表。
+    
+    格式: 列1=负责人, 列2=项目名称
+    返回: [(负责人, 项目名称), ...]
+    """
+    projects = []
+    if not os.path.exists(filepath):
+        print(f"  [错误] 未找到项目报告配置文件: {filepath}", flush=True)
+        return projects
+    try:
+        wb = openpyxl.load_workbook(filepath)
+        ws = wb.active
+        for row_idx in range(2, ws.max_row + 1):
+            owner = ws.cell(row=row_idx, column=1).value
+            project_name = ws.cell(row=row_idx, column=2).value
+            if owner and project_name:
+                projects.append((str(owner).strip(), str(project_name).strip()))
+        wb.close()
+    except Exception as e:
+        print(f"  [错误] 读取project-report.xlsx失败: {e}", flush=True)
+    return projects
+
+
+def query_project_ids_by_names(conn, project_names):
+    """根据项目名称查询项目ID，返回 {项目名称: 项目ID}"""
+    if not project_names:
+        return {}
+    cursor = conn.cursor()
+    placeholders = ','.join(['%s'] * len(project_names))
+    sql = f"SELECT id, name FROM zt_project WHERE name IN ({placeholders}) AND deleted='0'"
+    cursor.execute(sql, project_names)
+    result = {}
+    for row in cursor.fetchall():
+        result[row[1]] = row[0]
+    cursor.close()
+    return result
+
+
+def query_project_bug_stats(conn, project_id):
+    """统计项目相关的bug情况。
+    
+    返回: {
+        'today_opened': 当日新增数,
+        'today_resolved': 当日解决数,
+        'today_closed': 当日关闭数,
+        'total_active': 总激活数,
+        'total_resolved': 总的解决数,
+        'reactivated': 被二次激活数量,
+        'active_details': [(id, title, days, opened_count), ...] 激活bug详情
+    }
+    """
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    now = datetime.now()
+    cursor = conn.cursor()
+
+    # 当日新增数 (openedDate在今天)
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_bug WHERE project=%s AND deleted='0' AND DATE(openedDate)=%s",
+        (project_id, today_str)
+    )
+    today_opened = cursor.fetchone()[0]
+
+    # 当日解决数 (resolvedDate在今天)
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_bug WHERE project=%s AND deleted='0' AND DATE(resolvedDate)=%s",
+        (project_id, today_str)
+    )
+    today_resolved = cursor.fetchone()[0]
+
+    # 当日关闭数 (closedDate在今天)
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_bug WHERE project=%s AND deleted='0' AND DATE(closedDate)=%s",
+        (project_id, today_str)
+    )
+    today_closed = cursor.fetchone()[0]
+
+    # 总激活数 (status='active')
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_bug WHERE project=%s AND deleted='0' AND status='active'",
+        (project_id,)
+    )
+    total_active = cursor.fetchone()[0]
+
+    # 总的解决数 (status='resolved' 或 status='closed')
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_bug WHERE project=%s AND deleted='0' AND status IN ('resolved','closed')",
+        (project_id,)
+    )
+    total_resolved = cursor.fetchone()[0]
+
+    # 总关闭数 (status='closed')
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_bug WHERE project=%s AND deleted='0' AND status='closed'",
+        (project_id,)
+    )
+    total_closed = cursor.fetchone()[0]
+
+    # 被二次激活数量：在zt_action中同一个bug被activated两次以上
+    cursor.execute(
+        """SELECT COUNT(*) FROM (
+            SELECT a.objectID
+            FROM zt_action a
+            INNER JOIN zt_bug b ON a.objectID = b.id AND b.project=%s AND b.deleted='0'
+            WHERE a.objectType='bug' AND a.action='activated'
+            GROUP BY a.objectID
+            HAVING COUNT(*) >= 2
+        ) AS reactivated_bugs""",
+        (project_id,)
+    )
+    reactivated = cursor.fetchone()[0]
+
+    # 激活bug详情：id, 标题, 已生成的天数, opened次数, 被指派人
+    cursor.execute(
+        """SELECT b.id, b.title, b.openedDate,
+            (SELECT COUNT(*) FROM zt_action a
+             WHERE a.objectType='bug' AND a.objectID=b.id AND a.action='opened'
+            ) AS opened_count,
+            IFNULL(u.realname, b.assignedTo) AS assignee_name
+        FROM zt_bug b
+        LEFT JOIN zt_user u ON b.assignedTo = u.account
+        WHERE b.project=%s AND b.deleted='0' AND b.status='active'
+        ORDER BY b.openedDate ASC""",
+        (project_id,)
+    )
+    active_details = []
+    for row in cursor.fetchall():
+        bug_id = row[0]
+        title = row[1]
+        opened_date = row[2]
+        opened_count = row[3]
+        assignee = row[4] or ''
+        if isinstance(opened_date, datetime):
+            days = (now - opened_date).days
+        else:
+            days = 0
+        active_details.append((bug_id, title, days, opened_count, assignee))
+
+    cursor.close()
+    return {
+        'today_opened': today_opened,
+        'today_resolved': today_resolved,
+        'today_closed': today_closed,
+        'total_active': total_active,
+        'total_resolved': total_resolved,
+        'total_closed': total_closed,
+        'reactivated': reactivated,
+        'active_details': active_details,
+    }
+
+
+def query_project_task_stats(conn, project_id):
+    """统计项目相关的任务情况。
+    
+    返回: {
+        'today_finished': 今日完成任务数,
+        'delayed_tasks': [(任务名称, 截止日期), ...] 延期任务,
+        'project_end': 发布日期(项目结束时间)
+    }
+    """
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    cursor = conn.cursor()
+
+    # 今日完成任务数
+    cursor.execute(
+        "SELECT COUNT(*) FROM zt_task WHERE project=%s AND deleted='0' AND DATE(finishedDate)=%s",
+        (project_id, today_str)
+    )
+    today_finished = cursor.fetchone()[0]
+
+    # 延期任务：deadline已过且status不是done/closed/cancel
+    cursor.execute(
+        """SELECT t.name, t.deadline, IFNULL(u.realname, t.assignedTo) AS assignee_name
+        FROM zt_task t
+        LEFT JOIN zt_user u ON t.assignedTo = u.account
+        WHERE t.project=%s AND t.deleted='0'
+          AND t.deadline IS NOT NULL AND t.deadline <> '0000-00-00'
+          AND t.deadline < %s
+          AND t.status IN ('wait', 'doing', 'pause')
+        ORDER BY t.deadline ASC""",
+        (project_id, today_str)
+    )
+    delayed_tasks = [(row[0], str(row[1]), row[2] or '') for row in cursor.fetchall()]
+
+    # 发布日期（项目结束时间）
+    cursor.execute("SELECT `end` FROM zt_project WHERE id=%s", (project_id,))
+    row = cursor.fetchone()
+    project_end = str(row[0]) if row else ''
+
+    cursor.close()
+    return {
+        'today_finished': today_finished,
+        'delayed_tasks': delayed_tasks,
+        'project_end': project_end,
+    }
+
+
+def generate_project_report(project_stats, output_path):
+    """生成项目统计报告Excel。
+    
+    project_stats: [(负责人, 项目名称, bug_stats, task_stats), ...]
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "项目统计报告"
+
+    headers = [
+        '负责人', '项目名称', '发布日期',
+        '当日新增Bug', '当日解决Bug', '当日关闭Bug',
+        '总激活Bug', '总解决Bug', '总关闭Bug', '二次激活Bug',
+        '今日完成任务', '延期任务数', '延期任务明细'
+    ]
+
+    # 表头样式
+    header_font = Font(name='微软雅黑', bold=True, size=11, color='FFFFFF')
+    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    data_font = Font(name='微软雅黑', size=10)
+    data_alignment = Alignment(vertical='center', wrap_text=True)
+
+    for row_idx, (owner, project_name, bug_stats, task_stats) in enumerate(project_stats, 2):
+        delayed_detail = '\n'.join(
+            f"{item[0]}(截止:{item[1]}, 负责人:{item[2]})" for item in task_stats['delayed_tasks']
+        ) if task_stats['delayed_tasks'] else '无'
+
+        row_data = [
+            owner,
+            project_name,
+            task_stats['project_end'],
+            bug_stats['today_opened'],
+            bug_stats['today_resolved'],
+            bug_stats['today_closed'],
+            bug_stats['total_active'],
+            bug_stats['total_resolved'],
+            bug_stats['total_closed'],
+            bug_stats['reactivated'],
+            task_stats['today_finished'],
+            len(task_stats['delayed_tasks']),
+            delayed_detail,
+        ]
+
+        for col_idx, value in enumerate(row_data, 1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.font = data_font
+            cell.alignment = data_alignment
+            cell.border = thin_border
+
+    # 调整列宽
+    col_widths = [10, 20, 12, 12, 12, 12, 12, 12, 12, 12, 12, 12, 40]
+    for col_idx, width in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
+
+    ws.freeze_panes = 'A2'
+
+    # 激活bug详情sheet
+    ws2 = wb.create_sheet(title="激活Bug详情")
+    detail_headers = ['负责人', '项目名称', 'Bug编号', 'Bug标题', '已生成天数', 'Opened次数', '被指派人']
+    for col_idx, h in enumerate(detail_headers, 1):
+        cell = ws2.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    detail_row = 2
+    for owner, project_name, bug_stats, task_stats in project_stats:
+        for bug_id, title, days, opened_count, assignee in bug_stats.get('active_details', []):
+            row_data = [owner, project_name, bug_id, title, days, opened_count, assignee]
+            for col_idx, value in enumerate(row_data, 1):
+                cell = ws2.cell(row=detail_row, column=col_idx, value=value)
+                cell.font = data_font
+                cell.alignment = data_alignment
+                cell.border = thin_border
+            detail_row += 1
+
+    detail_widths = [10, 20, 10, 50, 12, 12, 12]
+    for col_idx, width in enumerate(detail_widths, 1):
+        ws2.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
+    ws2.freeze_panes = 'A2'
+
+    wb.save(output_path)
+    return output_path
+
+
+def evaluate_project_health(bug_stats, task_stats):
+    """根据bug和任务数据对项目整体情况做评定。"""
+    issues = []
+    total_active = bug_stats['total_active']
+    reactivated = bug_stats['reactivated']
+    delayed_count = len(task_stats['delayed_tasks'])
+
+    if total_active > 10:
+        issues.append(f"激活Bug较多({total_active}个)")
+    if reactivated > 3:
+        issues.append(f"二次激活Bug较多({reactivated}个)，需关注开发质量")
+    if delayed_count > 5:
+        issues.append(f"延期任务较多({delayed_count}个)，进度风险较高")
+    elif delayed_count > 0:
+        issues.append(f"存在{delayed_count}个延期任务")
+
+    if bug_stats['today_opened'] > bug_stats['today_resolved'] + bug_stats['today_closed']:
+        issues.append("今日新增Bug多于解决+关闭数，Bug积压趋势")
+
+    if not issues:
+        return "✅ 项目整体状况良好"
+    elif len(issues) <= 1:
+        return "⚠️ " + issues[0]
+    else:
+        return "⚠️ 风险提示:\n  " + "\n  ".join(issues)
+
+
+def send_project_report_dingtalk(project_stats, dingtalk_map):
+    """按负责人和项目分组，每个项目发送一条包含bug和任务统计的钉钉消息。"""
+    # 按负责人分组
+    owner_stats = {}
+    for owner, project_name, bug_stats, task_stats in project_stats:
+        owner_stats.setdefault(owner, []).append((project_name, bug_stats, task_stats))
+
+    for owner, items in owner_stats.items():
+        dingtalk_id = dingtalk_map.get(owner, '')
+        if not dingtalk_id:
+            print(f"  [跳过报告通知] {owner} 不在dingtalk-mem.xlsx中", flush=True)
+            continue
+
+        userid = dingtalk_map.get(owner, '')
+        if not userid:
+            continue
+
+        # 每个项目发送一条消息
+        for project_name, bug_stats, task_stats in items:
+            lines = []
+            lines.append(f"【{project_name}】项目统计 (发布日期: {task_stats['project_end']})")
+            lines.append("")
+            # Bug统计部分
+            lines.append("▶ Bug情况:")
+            lines.append(
+                f"  今日新增: {bug_stats['today_opened']}, "
+                f"今日解决: {bug_stats['today_resolved']}, "
+                f"今日关闭: {bug_stats['today_closed']}"
+            )
+            lines.append(
+                f"  总激活: {bug_stats['total_active']}, "
+                f"总解决: {bug_stats['total_resolved']}, "
+                f"总关闭: {bug_stats['total_closed']}, "
+                f"二次激活: {bug_stats['reactivated']}"
+            )
+            # 激活bug详情
+            active_details = bug_stats.get('active_details', [])
+            if active_details:
+                lines.append(f"  激活Bug详情({len(active_details)}个):")
+                for bug_id, title, days, opened_count, assignee in active_details[:20]:
+                    lines.append(
+                        f"    Bug#{bug_id} {title} ({days}天, opened{opened_count}次, 指派:{assignee})"
+                    )
+                if len(active_details) > 20:
+                    lines.append(f"    ...共{len(active_details)}个，仅显示前20个")
+
+            lines.append("")
+            # 任务统计部分
+            lines.append("▶ 任务情况:")
+            lines.append(f"  今日完成任务: {task_stats['today_finished']}")
+            delayed = task_stats['delayed_tasks']
+            if delayed:
+                lines.append(f"  延期任务({len(delayed)}个):")
+                for item in delayed[:20]:
+                    name, date, assignee = item[0], item[1], item[2]
+                    lines.append(f"    - {name} (截止: {date}, 负责人: {assignee})")
+                if len(delayed) > 20:
+                    lines.append(f"    ...共{len(delayed)}个，仅显示前20个")
+            else:
+                lines.append("  延期任务: 无")
+
+            # 项目整体评定
+            lines.append("")
+            lines.append("▶ 整体评定:")
+            lines.append(f"  {evaluate_project_health(bug_stats, task_stats)}")
+
+            text = f"{project_name}项目统计：\n\n" + "\n".join(lines)
+
+            sent = send_direct_message([userid], text)
+            if sent:
+                print(f"  项目统计消息发送成功 → {owner} [{project_name}]", flush=True)
+                log_dingtalk_send(owner, text, "direct")
+            else:
+                print(f"  项目统计消息发送失败 → {owner} [{project_name}]", flush=True)
+
+
+def MonitorProjectReport():
+    """功能6：项目bug和任务统计报告"""
+    output_dir = get_app_dir()
+    config_path = os.path.join(output_dir, 'project-report.xlsx')
+    report_path = os.path.join(output_dir, f'project-report-{datetime.now().strftime("%Y%m%d")}.xlsx')
+
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("项目统计报告", flush=True)
+    print("=" * 60, flush=True)
+
+    # 加载项目配置
+    projects = load_project_report_config(config_path)
+    if not projects:
+        print("未配置要统计的项目，程序结束", flush=True)
+        return
+
+    print(f"已加载 {len(projects)} 个项目配置", flush=True)
+
+    conn = get_db_connection()
+    try:
+        # 获取项目ID
+        project_names = list(set(name for _, name in projects))
+        name_id_map = query_project_ids_by_names(conn, project_names)
+        print(f"匹配到 {len(name_id_map)} 个项目", flush=True)
+
+        # 统计每个项目
+        project_stats = []
+        for owner, project_name in projects:
+            project_id = name_id_map.get(project_name)
+            if not project_id:
+                print(f"  [跳过] 未找到项目: {project_name}", flush=True)
+                project_stats.append((owner, project_name,
+                    {'today_opened': 0, 'today_resolved': 0, 'today_closed': 0,
+                     'total_active': 0, 'total_resolved': 0, 'reactivated': 0},
+                    {'today_finished': 0, 'delayed_tasks': [], 'project_end': '未找到'}))
+                continue
+
+            print(f"  统计项目: {project_name} (ID={project_id}, 负责人={owner})", flush=True)
+            bug_stats = query_project_bug_stats(conn, project_id)
+            task_stats = query_project_task_stats(conn, project_id)
+            project_stats.append((owner, project_name, bug_stats, task_stats))
+
+            print(f"    Bug: 今日新增={bug_stats['today_opened']}, 今日解决={bug_stats['today_resolved']}, "
+                  f"今日关闭={bug_stats['today_closed']}, 总激活={bug_stats['total_active']}, "
+                  f"总解决={bug_stats['total_resolved']}, 总关闭={bug_stats['total_closed']}, "
+                  f"二次激活={bug_stats['reactivated']}", flush=True)
+            print(f"    任务: 今日完成={task_stats['today_finished']}, "
+                  f"延期={len(task_stats['delayed_tasks'])}, 发布日期={task_stats['project_end']}", flush=True)
+
+    finally:
+        conn.close()
+
+    # 生成报告
+    generate_project_report(project_stats, report_path)
+    print(f"\n报告已生成: {report_path}", flush=True)
+
+    # 发送钉钉消息给负责人
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("发送项目统计钉钉消息", flush=True)
+    print("=" * 60, flush=True)
+    dingtalk_map, _, _ = get_dingtalk_members()
+    send_project_report_dingtalk(project_stats, dingtalk_map)
+
+
 if __name__ == '__main__':
-    MonitorBugs()
-    MonitorBugAssignments()
-    MonitorTasks()
-    MonitorDelayedTasks()
-    MonitorDeadlineTasks()
+    if len(sys.argv) > 1 and sys.argv[1] == 'report':
+        MonitorProjectReport()
+    else:
+        MonitorBugs()
+        MonitorBugAssignments()
+        MonitorTasks()
+        MonitorDelayedTasks()
+        MonitorDeadlineTasks()
