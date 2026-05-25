@@ -2257,9 +2257,416 @@ def MonitorProjectReport():
     send_project_report_dingtalk(project_stats, dingtalk_map)
 
 
+# ============================================================
+# 功能7：开发人员KPI评定
+# 只对dingtalk-mem.xlsx中的人评定，不评主管，按小组排名，每维度3个等级(5/4/3)
+# ============================================================
+
+def get_month_week_ranges():
+    """获取最近35天内每周的起止日期列表（可跨月），返回[(week_label, monday, sunday), ...]"""
+    today = datetime.now().date()
+    start_date = today - timedelta(days=35)
+    # 找到start_date所在周的周一
+    first_monday = start_date - timedelta(days=start_date.weekday())
+
+    weeks = []
+    current_monday = first_monday
+    week_num = 1
+    while current_monday <= today:
+        sunday = current_monday + timedelta(days=6)
+        weeks.append((f"第{week_num}周({current_monday.strftime('%m/%d')})", current_monday, sunday))
+        current_monday += timedelta(weeks=1)
+        week_num += 1
+    return weeks
+
+
+def query_dev_svn_commits(svn_repos, monday, sunday):
+    """查询所有SVN仓库中每个开发人员在指定周内的提交次数。
+    返回: {svn_author: commit_count}
+    """
+    since_date = monday.strftime('%Y-%m-%d')
+    until_date = (sunday + timedelta(days=1)).strftime('%Y-%m-%d')
+    author_commits = {}
+
+    for repo_url in svn_repos:
+        cmd = [
+            'svn', 'log', repo_url,
+            '--non-interactive',
+            '--xml',
+            '-r', f'{{{since_date}}}:{{{until_date}}}',
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60, encoding='utf-8')
+            if result.returncode != 0:
+                continue
+            entries = parse_svn_xml(result.stdout)
+            for _, author, _, _ in entries:
+                if author:
+                    author_commits[author] = author_commits.get(author, 0) + 1
+        except Exception:
+            continue
+
+    return author_commits
+
+
+def query_dev_bug_quality(conn, dev_accounts, monday, sunday):
+    """查询开发人员在指定周内的bug修复质量。
+    返回: {account: {'resolved': int, 'reactivated': int}}
+    """
+    if not dev_accounts:
+        return {}
+
+    since_str = monday.strftime('%Y-%m-%d')
+    until_str = (sunday + timedelta(days=1)).strftime('%Y-%m-%d')
+    cursor = conn.cursor()
+    result = {}
+
+    for account in dev_accounts:
+        cursor.execute(
+            """SELECT COUNT(*) FROM zt_bug
+            WHERE resolvedBy=%s AND deleted='0'
+              AND resolvedDate >= %s AND resolvedDate < %s""",
+            (account, since_str, until_str)
+        )
+        resolved = cursor.fetchone()[0]
+
+        cursor.execute(
+            """SELECT COUNT(*) FROM (
+                SELECT b.id
+                FROM zt_bug b
+                INNER JOIN zt_action a ON a.objectType='bug' AND a.objectID=b.id AND a.action='activated'
+                WHERE b.resolvedBy=%s AND b.deleted='0'
+                  AND b.resolvedDate >= %s AND b.resolvedDate < %s
+                GROUP BY b.id
+                HAVING COUNT(*) >= 1
+            ) AS reactivated""",
+            (account, since_str, until_str)
+        )
+        reactivated = cursor.fetchone()[0]
+
+        result[account] = {
+            'resolved': resolved,
+            'reactivated': reactivated,
+        }
+
+    cursor.close()
+    return result
+
+
+def query_dev_task_stats(conn, dev_accounts, monday, sunday):
+    """查询开发人员在指定周内的任务完成情况。
+    返回: {account: {'finished': int, 'overdue': int}}
+    """
+    if not dev_accounts:
+        return {}
+
+    since_str = monday.strftime('%Y-%m-%d')
+    until_str = (sunday + timedelta(days=1)).strftime('%Y-%m-%d')
+    cursor = conn.cursor()
+    result = {}
+
+    for account in dev_accounts:
+        cursor.execute(
+            """SELECT COUNT(*) FROM zt_task
+            WHERE finishedBy=%s AND deleted='0'
+              AND finishedDate >= %s AND finishedDate < %s""",
+            (account, since_str, until_str)
+        )
+        finished = cursor.fetchone()[0]
+
+        cursor.execute(
+            """SELECT COUNT(*) FROM zt_task
+            WHERE assignedTo=%s AND deleted='0'
+              AND deadline >= %s AND deadline < %s
+              AND status NOT IN ('done', 'closed', 'cancel')""",
+            (account, since_str, until_str)
+        )
+        overdue = cursor.fetchone()[0]
+
+        result[account] = {
+            'finished': finished,
+            'overdue': overdue,
+        }
+
+    cursor.close()
+    return result
+
+
+def calculate_kpi_score(svn_commits, bug_quality, task_stats):
+    """计算开发人员KPI评分，每个维度3个等级(5/4/3)，总分满分15。
+
+    评分规则:
+    - SVN提交: >=10次=5, 4-9次=4, <4次=3
+    - Bug质量: 解决>=5且无二次激活=5, 解决>=3或有少量激活=4, 其他=3
+    - 任务完成: 完成>=3且无超期=5, 完成>=1或少量超期=4, 其他=3
+    """
+    # SVN提交评分 (5/4/3)
+    if svn_commits >= 10:
+        svn_score = 5
+    elif svn_commits >= 4:
+        svn_score = 4
+    else:
+        svn_score = 3
+
+    # Bug质量评分 (5/4/3)
+    resolved = bug_quality.get('resolved', 0)
+    reactivated = bug_quality.get('reactivated', 0)
+    if resolved >= 5 and reactivated == 0:
+        bug_score = 5
+    elif resolved >= 3 or (resolved >= 1 and reactivated == 0):
+        bug_score = 4
+    else:
+        bug_score = 3
+
+    # 任务完成评分 (5/4/3)
+    finished = task_stats.get('finished', 0)
+    overdue = task_stats.get('overdue', 0)
+    if finished >= 3 and overdue == 0:
+        task_score = 5
+    elif finished >= 1 or overdue == 0:
+        task_score = 4
+    else:
+        task_score = 3
+
+    total = svn_score + bug_score + task_score
+    return {
+        'total': total,
+        'svn_score': svn_score,
+        'bug_score': bug_score,
+        'task_score': task_score,
+    }
+
+
+def generate_kpi_report(weekly_kpi_data, output_path):
+    """生成KPI报告Excel，按小组分组排名。
+
+    weekly_kpi_data: [(week_label, {group_name: [(realname, account, scores, svn_commits, bug_quality, task_stats), ...]}), ...]
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "开发人员KPI"
+
+    headers = [
+        '周期', '小组', '排名', '姓名', '总分(15)',
+        '解决Bug数', '二次激活', 'Bug质量(5/4/3)',
+        '完成任务数', '超期任务数', '任务(5/4/3)',
+        'SVN提交次数', 'SVN(5/4/3)'
+    ]
+
+    header_font = Font(name='微软雅黑', bold=True, size=11, color='FFFFFF')
+    header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+    header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    thin_border = Border(
+        left=Side(style='thin'), right=Side(style='thin'),
+        top=Side(style='thin'), bottom=Side(style='thin')
+    )
+
+    for col_idx, h in enumerate(headers, 1):
+        cell = ws.cell(row=1, column=col_idx, value=h)
+        cell.font = header_font
+        cell.fill = header_fill
+        cell.alignment = header_alignment
+        cell.border = thin_border
+
+    data_font = Font(name='微软雅黑', size=10)
+    data_alignment = Alignment(vertical='center', horizontal='center')
+
+    row_idx = 2
+    for week_label, group_data in weekly_kpi_data:
+        for group_name, dev_list in group_data.items():
+            for rank, (realname, account, scores, svn_commits, bug_quality, task_stats) in enumerate(dev_list, 1):
+                row_data = [
+                    week_label, group_name, rank, realname, scores['total'],
+                    bug_quality.get('resolved', 0), bug_quality.get('reactivated', 0), scores['bug_score'],
+                    task_stats.get('finished', 0), task_stats.get('overdue', 0), scores['task_score'],
+                    svn_commits, scores['svn_score'],
+                ]
+                for col_idx, value in enumerate(row_data, 1):
+                    cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                    cell.font = data_font
+                    cell.alignment = data_alignment
+                    cell.border = thin_border
+                row_idx += 1
+
+    col_widths = [10, 8, 6, 10, 9, 10, 10, 10, 10, 10, 8, 12, 8]
+    for col_idx, width in enumerate(col_widths, 1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(col_idx)].width = width
+
+    ws.freeze_panes = 'A2'
+    wb.save(output_path)
+    return output_path
+
+
+def send_kpi_dingtalk(weekly_kpi_data, dingtalk_map):
+    """发送KPI评定结果到钉钉，按小组发送。"""
+    if not weekly_kpi_data:
+        return
+
+    for week_label, group_data in weekly_kpi_data:
+        for group_name, dev_list in group_data.items():
+            if not dev_list:
+                continue
+
+            lines = [f"KPI周报 - {week_label} [{group_name}组]", ""]
+            lines.append(f"{'排名':<4} {'姓名':<6} {'总分':<4} {'Bug':<4} {'任务':<4} {'SVN':<4}")
+            lines.append("-" * 36)
+            for rank, (realname, account, scores, svn_commits, bug_quality, task_stats) in enumerate(dev_list, 1):
+                lines.append(
+                    f"#{rank:<3} {realname:<6} {scores['total']:<4} "
+                    f"{scores['bug_score']:<4} {scores['task_score']:<4} {scores['svn_score']:<4}"
+                )
+
+            lines.append("")
+            lines.append("评分: Bug质量(5/4/3) + 任务完成(5/4/3) + SVN提交(5/4/3) = 满分15")
+
+            text = "\n".join(lines)
+
+            # 发送给该小组所有有钉钉ID的开发人员
+            all_user_ids = []
+            for realname, account, _, _, _, _ in dev_list:
+                userid = dingtalk_map.get(realname, '')
+                if userid:
+                    all_user_ids.append(userid)
+
+            if all_user_ids:
+                sent = send_direct_message(all_user_ids, text)
+                if sent:
+                    print(f"  KPI周报发送成功 ({week_label} {group_name}组, {len(all_user_ids)}人)", flush=True)
+                    log_dingtalk_send(f"{group_name}组", text, "direct")
+                else:
+                    print(f"  KPI周报发送失败 ({week_label} {group_name}组)", flush=True)
+
+
+def MonitorDevKPI():
+    """功能7：开发人员本月KPI评定
+    只对dingtalk-mem.xlsx中的人评定，不评主管，按小组排名
+    """
+    output_dir = get_app_dir()
+    svn_repo_config_path = os.path.join(output_dir, 'svn_repos.xlsx')
+    report_path = os.path.join(output_dir, f'dev-kpi-{datetime.now().strftime("%Y%m")}.xlsx')
+
+    print(flush=True)
+    print("=" * 60, flush=True)
+    print("开发人员KPI评定", flush=True)
+    print("=" * 60, flush=True)
+
+    # 加载钉钉成员（只评定dingtalk-mem.xlsx中的人）
+    dingtalk_map, member_group_map, group_supervisors = get_dingtalk_members()
+    if not dingtalk_map:
+        print("未找到钉钉成员配置，无法评定", flush=True)
+        return
+
+    # 收集所有主管姓名（不参与评定）
+    all_supervisors = set()
+    for sups in group_supervisors.values():
+        all_supervisors.update(sups)
+
+    # 筛选非主管的开发组成员（只统计开发人员）
+    # group_members: {小组名: [姓名列表]}
+    group_members = {}
+    for name, groups in member_group_map.items():
+        if name in all_supervisors:
+            continue
+        if '开发' in groups:
+            group_members.setdefault('开发', []).append(name)
+
+    if not group_members:
+        print("没有需要评定的人员", flush=True)
+        return
+
+    total_members = sum(len(v) for v in group_members.values())
+    print(f"评定人员: {total_members} 人 (排除主管: {', '.join(all_supervisors)})", flush=True)
+    for g, members in group_members.items():
+        print(f"  {g}组: {', '.join(members)}", flush=True)
+
+    # 从数据库获取 realname -> account 映射
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT account, realname FROM zt_user WHERE deleted='0'")
+    all_users = cursor.fetchall()
+    cursor.close()
+    realname_to_account = {u[1]: u[0] for u in all_users}
+
+    # 加载SVN仓库配置
+    svn_repos = load_svn_repos(svn_repo_config_path)
+    if not svn_repos:
+        print("未配置SVN仓库，跳过SVN评定", flush=True)
+        svn_repos = []
+
+    # 获取所有待评定开发人员的account
+    eval_accounts = []
+    name_account_map = {}
+    dev_names = group_members.get('开发', [])
+    for name in dev_names:
+        account = realname_to_account.get(name, '')
+        if account:
+            name_account_map[name] = account
+            eval_accounts.append(account)
+
+    # 获取最近30天每周范围
+    weeks = get_month_week_ranges()
+    print(f"统计周数: {len(weeks)} (最近35天)", flush=True)
+
+    weekly_kpi_data = []
+
+    for week_label, monday, sunday in weeks:
+        print(f"\n  {week_label} ({monday} ~ {sunday}):", flush=True)
+
+        # SVN提交统计
+        author_commits = {}
+        if svn_repos:
+            author_commits = query_dev_svn_commits(svn_repos, monday, sunday)
+            print(f"    SVN提交人数: {len(author_commits)}", flush=True)
+
+        # Bug修复质量
+        bug_quality_map = query_dev_bug_quality(conn, eval_accounts, monday, sunday)
+
+        # 任务完成情况
+        task_stats_map = query_dev_task_stats(conn, eval_accounts, monday, sunday)
+
+        # 按小组计算KPI并排名
+        group_scores = {}
+        for group_name, members in group_members.items():
+            dev_scores = []
+            for name in members:
+                account = name_account_map.get(name, '')
+                if not account:
+                    continue
+                svn_commits = author_commits.get(account, 0)
+                bug_quality = bug_quality_map.get(account, {'resolved': 0, 'reactivated': 0})
+                task_stats = task_stats_map.get(account, {'finished': 0, 'overdue': 0})
+
+                scores = calculate_kpi_score(svn_commits, bug_quality, task_stats)
+                dev_scores.append((name, account, scores, svn_commits, bug_quality, task_stats))
+
+            # 按总分排序
+            dev_scores.sort(key=lambda x: x[2]['total'], reverse=True)
+            group_scores[group_name] = dev_scores
+
+        # 打印结果
+        for group_name, dev_list in group_scores.items():
+            print(f"    [{group_name}组]", flush=True)
+            for rank, (realname, _, scores, svn_commits, bug_q, task_s) in enumerate(dev_list, 1):
+                print(f"      #{rank} {realname}: {scores['total']}/15 "
+                      f"(Bug={bug_q['resolved']}/激活{bug_q['reactivated']}/{scores['bug_score']}, "
+                      f"任务={task_s['finished']}/超期{task_s['overdue']}/{scores['task_score']}, "
+                      f"SVN={svn_commits}次/{scores['svn_score']})",
+                      flush=True)
+
+        weekly_kpi_data.append((week_label, group_scores))
+
+    conn.close()
+
+    # 生成报告
+    generate_kpi_report(weekly_kpi_data, report_path)
+    print(f"\nKPI报告已生成: {report_path}", flush=True)
+
+
 if __name__ == '__main__':
     if len(sys.argv) > 1 and sys.argv[1] == 'report':
         MonitorProjectReport()
+    elif len(sys.argv) > 1 and sys.argv[1] == 'kpi':
+        MonitorDevKPI()
     else:
         MonitorBugs()
         MonitorBugAssignments()
