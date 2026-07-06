@@ -221,8 +221,8 @@ if __name__ == "__main__":
     print(f"Access Token 获取成功: {client.access_token[:20]}...")
 
     # 查找用户列表
-    # names = ["韦家鹏", "李波", "杨光雪", "杨秋冬", "吴涛"]
-    names = ["韦家鹏"]
+    names = ["韦家鹏", "李波", "杨光雪"]
+    #names = ["韦家鹏"]
     for name in names:
         user = client.find_user_by_name(name)
         if user:
