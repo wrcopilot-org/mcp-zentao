@@ -11,6 +11,12 @@ import pymysql
 from pymysql.cursors import DictCursor
 
 
+def get_app_dir() -> Path:
+	if getattr(sys, "frozen", False):
+		return Path(sys.executable).resolve().parent
+	return Path(__file__).resolve().parent
+
+
 DEFAULT_DB_CONFIG = {
 	"host": os.getenv("EPM_DB_HOST", "192.168.0.26"),
 	"port": int(os.getenv("EPM_DB_PORT", "3306")),
@@ -24,9 +30,9 @@ DEFAULT_START_DATE = "2026-06-04"
 DEFAULT_END_DATE = "2026-06-10"
 DEFAULT_VID_PATTERN = "epm2030_%117"
 DEFAULT_VID_PATTERNS = [DEFAULT_VID_PATTERN]
-DEFAULT_OUTPUT_FILE = Path(__file__).with_name("yiwo_operation_20260604_20260610_epm2030_117.csv")
+DEFAULT_OUTPUT_FILE = get_app_dir() / "yiwo_operation_20260604_20260610_epm2030_117.csv"
 DEFAULT_OUTPUT_DIR = DEFAULT_OUTPUT_FILE.parent
-DEFAULT_CONFIG_FILE = Path(__file__).with_name("get_log_data.ini")
+DEFAULT_CONFIG_FILE = get_app_dir() / "get_log_data.ini"
 
 
 def normalize_vid_patterns(values: list[str] | tuple[str, ...] | None) -> list[str]:

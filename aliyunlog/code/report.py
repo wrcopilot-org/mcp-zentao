@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import configparser
 import csv
+import sys
 from collections import defaultdict
 from pathlib import Path
 
@@ -11,7 +12,13 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 
-DEFAULT_CONFIG_FILE = Path(__file__).with_name("get_log_data.ini")
+def get_app_dir() -> Path:
+	if getattr(sys, "frozen", False):
+		return Path(sys.executable).resolve().parent
+	return Path(__file__).resolve().parent
+
+
+DEFAULT_CONFIG_FILE = get_app_dir() / "get_log_data.ini"
 REQUIRED_COLUMNS = {"vid", "uid", "window", "activity"}
 VARIANT_ORDER = {"A": 0, "B": 1}
 CHANNEL_ORDER = {"free": 0, "trial": 1}
