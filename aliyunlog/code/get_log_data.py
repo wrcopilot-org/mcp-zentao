@@ -28,6 +28,7 @@ DEFAULT_DB_CONFIG = {
 TABLE_NAME = "yiwo_operation"
 DEFAULT_START_DATE = "2026-06-04"
 DEFAULT_END_DATE = "2026-06-10"
+DEFAULT_ACTIVITY = ""
 DEFAULT_VID_PATTERN = "epm2030_%117"
 DEFAULT_VID_PATTERNS = [DEFAULT_VID_PATTERN]
 DEFAULT_OUTPUT_FILE = get_app_dir() / "yiwo_operation_20260604_20260610_epm2030_117.csv"
@@ -65,6 +66,7 @@ def load_ini_defaults(config_path: Path) -> dict:
 		"database": DEFAULT_DB_CONFIG["database"],
 		"start_date": DEFAULT_START_DATE,
 		"end_date": DEFAULT_END_DATE,
+		"activity": DEFAULT_ACTIVITY,
 		"vid_patterns": DEFAULT_VID_PATTERNS.copy(),
 		"output_dir": str(DEFAULT_OUTPUT_DIR),
 		"output": str(DEFAULT_OUTPUT_FILE),
@@ -86,6 +88,7 @@ def load_ini_defaults(config_path: Path) -> dict:
 	if config.has_section("export"):
 		defaults["start_date"] = config.get("export", "start_date", fallback=defaults["start_date"])
 		defaults["end_date"] = config.get("export", "end_date", fallback=defaults["end_date"])
+		defaults["activity"] = config.get("export", "activity", fallback=defaults["activity"])
 		vid_pattern_keys = sorted(
 			(key for key, _ in config.items("export") if key.startswith("vid_pattern")),
 			key=lambda key: (key != "vid_pattern", key),
@@ -111,6 +114,7 @@ def write_ini(args: argparse.Namespace, config_path: Path) -> None:
 	export_config = {
 		"start_date": args.start_date,
 		"end_date": args.end_date,
+		"activity": args.activity,
 		"output_dir": args.output_dir,
 		"output": args.output,
 	}
@@ -124,14 +128,16 @@ def write_ini(args: argparse.Namespace, config_path: Path) -> None:
 		config.write(f)
 
 
-def build_query(vid_pattern_count: int = 1) -> str:
+def build_query(vid_pattern_count: int = 1, has_activity: bool = False) -> str:
 	vid_conditions = " OR ".join(["`vid` LIKE %s"] * max(vid_pattern_count, 1))
+	activity_condition = "\n\t  AND `activity` = %s" if has_activity else ""
 	return f"""
 	SELECT *
 	FROM `{TABLE_NAME}`
 	WHERE `timestamp` > UNIX_TIMESTAMP(%s)
 	  AND `timestamp` < UNIX_TIMESTAMP(%s)
 	  AND ({vid_conditions})
+	  {activity_condition}
 	"""
 
 
@@ -153,14 +159,22 @@ def resolve_output_path(output_dir: str, output: str) -> Path:
 	return Path(output_dir) / output_path
 
 
-def fetch_rows(db_config: dict, start_date: str, end_date: str, vid_patterns: list[str]) -> tuple[list[str], list[dict]]:
+def fetch_rows(
+	db_config: dict,
+	start_date: str,
+	end_date: str,
+	vid_patterns: list[str],
+	activity: str = "",
+) -> tuple[list[str], list[dict]]:
 	vid_patterns = normalize_vid_patterns(vid_patterns)
-	sql = build_query(len(vid_patterns))
+	activity = activity.strip()
+	sql = build_query(len(vid_patterns), bool(activity))
+	params = (start_date, end_date, *vid_patterns, *([activity] if activity else []))
 
 	conn = pymysql.connect(**db_config)
 	try:
 		with conn.cursor() as cur:
-			cur.execute(sql, (start_date, end_date, *vid_patterns))
+			cur.execute(sql, params)
 			headers = [field[0] for field in cur.description]
 			rows = cur.fetchall()
 			return headers, rows
@@ -195,6 +209,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 	parser.add_argument("--database", default=defaults["database"], help="MySQL 数据库名")
 	parser.add_argument("--start-date", default=defaults["start_date"], help="开始日期，不包含边界日期本身")
 	parser.add_argument("--end-date", default=defaults["end_date"], help="结束日期，不包含边界日期本身")
+	parser.add_argument("--activity", default=defaults["activity"], help="activity 精确匹配值，留空则不限制")
 	parser.add_argument("--vid-pattern", action="append", dest="vid_patterns", help="vid LIKE 匹配表达式，可重复传入")
 	parser.add_argument("--output-dir", default=defaults["output_dir"], help="CSV 输出目录")
 	parser.add_argument("--output", default=defaults["output"], help="输出 CSV 文件路径")
@@ -218,13 +233,14 @@ def main() -> None:
 	output_path = resolve_output_path(args.output_dir, args.output)
 	db_config = build_db_config(args)
 	vid_patterns = normalize_vid_patterns(args.vid_patterns)
-	sql = build_query(len(vid_patterns))
-	params = (args.start_date, args.end_date, *vid_patterns)
+	activity = args.activity.strip()
+	sql = build_query(len(vid_patterns), bool(activity))
+	params = (args.start_date, args.end_date, *vid_patterns, *([activity] if activity else []))
 
 	print("SQL:")
 	print(printable_sql(sql, params))
 
-	headers, rows = fetch_rows(db_config, args.start_date, args.end_date, vid_patterns)
+	headers, rows = fetch_rows(db_config, args.start_date, args.end_date, vid_patterns, activity)
 	write_csv(headers, rows, output_path)
 
 	print(f"Rows: {len(rows)}")
