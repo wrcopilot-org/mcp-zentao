@@ -5,6 +5,7 @@ import configparser
 import csv
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -61,11 +62,50 @@ def parse_attribute(value: str) -> dict[str, Any]:
 	return parsed
 
 
+def get_clone_result(attribute: dict[str, Any]) -> tuple[str, str, str]:
+    result = str(attribute.get("result") or "").strip()
+    message = str(attribute.get("message") or "").strip()
+    time_used = str(attribute.get("time_used") or "").strip()
+    if result:
+        return result, message, time_used
+
+    clone_result = attribute.get(CLONE_ACTIVITY)
+    if not isinstance(clone_result, dict):
+        return "", message, time_used
+
+    disk_statuses: list[str] = []
+    disk_messages: list[str] = []
+    disk_time_used: list[str] = []
+    for disk_name, disk_result in sorted(clone_result.items()):
+        if not isinstance(disk_result, dict):
+            continue
+        disk_status = str(disk_result.get("result") or "").strip()
+        disk_message = str(disk_result.get("message") or "").strip()
+        disk_time = str(disk_result.get("time_used") or "").strip()
+        if disk_status:
+            disk_statuses.append(disk_status)
+            disk_messages.append(f"{disk_name}:{disk_status}")
+        if disk_message:
+            disk_messages.append(f"{disk_name}:{disk_message}")
+        if disk_time:
+            disk_time_used.append(f"{disk_name}:{disk_time}")
+
+    result = SUCCESS_RESULT if disk_statuses and all(status == SUCCESS_RESULT for status in disk_statuses) else "failure"
+    return result, "; ".join(disk_messages), "; ".join(disk_time_used)
+
+
 def timestamp_sort_value(row: dict[str, str]) -> int:
 	try:
 		return int((row.get("timestamp") or "").strip())
 	except ValueError:
 		return 0
+
+
+def format_timestamp(row: dict[str, str]) -> str:
+	timestamp = timestamp_sort_value(row)
+	if not timestamp:
+		return ""
+	return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def format_rate(count: int, total: int) -> float:
@@ -95,9 +135,7 @@ def read_rows(input_path: Path) -> tuple[list[str], list[dict[str, str]]]:
 def parse_row(row: dict[str, str]) -> dict[str, Any]:
 	uid = (row.get("uid") or "").strip()
 	attribute = parse_attribute(row.get("attribute") or "")
-	result = str(attribute.get("result") or "").strip()
-	message = str(attribute.get("message") or "").strip()
-	time_used = str(attribute.get("time_used") or "").strip()
+	result, message, time_used = get_clone_result(attribute)
 	parse_error = str(attribute.get("parse_error") or "").strip()
 	return {
 		"row": row,
@@ -147,6 +185,25 @@ def append_rows(ws, headers: list[str], rows: list[list[object]]) -> None:
 		ws.append(row)
 
 
+def build_failed_headers(fieldnames: list[str]) -> list[str]:
+	headers: list[str] = []
+	for field in fieldnames:
+		headers.append(field)
+		if field == "timestamp":
+			headers.append("timestamp_time")
+	return headers + ["parsed_result", "parsed_message", "parsed_time_used", "parse_error"]
+
+
+def build_failed_row(fieldnames: list[str], item: dict[str, Any]) -> list[object]:
+	row = item["row"]
+	values: list[object] = []
+	for field in fieldnames:
+		values.append(row.get(field, ""))
+		if field == "timestamp":
+			values.append(format_timestamp(row))
+	return values + [item["result"], item["message"], item["time_used"], item["parse_error"]]
+
+
 def style_sheet(ws, freeze_panes: str = "A2") -> None:
 	header_fill = PatternFill("solid", fgColor="D9EAF7")
 	for cell in ws[1]:
@@ -193,15 +250,11 @@ def write_xlsx(fieldnames: list[str], report_data: dict[str, Any], output_path: 
 	style_sheet(result_ws)
 
 	failed_ws = wb.create_sheet("failed_uid_records")
-	failed_headers = fieldnames + ["parsed_result", "parsed_message", "parsed_time_used", "parse_error"]
-	failed_rows = [
-		[item["row"].get(field, "") for field in fieldnames]
-		+ [item["result"], item["message"], item["time_used"], item["parse_error"]]
-		for item in report_data["failed_uid_records"]
-	]
+	failed_headers = build_failed_headers(fieldnames)
+	failed_rows = [build_failed_row(fieldnames, item) for item in report_data["failed_uid_records"]]
 	append_rows(failed_ws, failed_headers, failed_rows)
-	red_font = Font(color="FF0000")
-	green_font = Font(color="008000")
+	red_font = Font(color="FFFF0000")
+	green_font = Font(color="FF008000")
 	for row_index, item in enumerate(report_data["failed_uid_records"], start=2):
 		if is_success_clone_record(item):
 			font = green_font
